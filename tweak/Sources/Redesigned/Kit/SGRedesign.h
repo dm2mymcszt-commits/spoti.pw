@@ -11,5 +11,9 @@ void SGRedesignForceFlags(NSString *owner, NSDictionary<NSString *, id> *flags);
 // Whether the parts that resize Element_List cells (AlbumSections, ArtistSections, HomeSections,
 // PlayerCards, SearchSections) hook them. Before iOS 26 the self-sizing pass keeps asking for the
 // size they change and the main thread spins until the watchdog kills the app (iOS 17.0, issue #37),
-// so there those sections stay as Spotify lays them out. Gate their %ctor on it after SGRedesignedUI().
+// so there those sections stay as Spotify lays them out unless the switch below is turned off.
+// Gate their %ctor on it after SGRedesignedUI(). Read at launch.
 BOOL SGRResizesListCells(void);
+
+// The switch for that, shown only before iOS 26; unset is on.
+#define SGRKeyListFreezeFix @"spotifyglass.redesign.listFreezeFix"
