@@ -103,9 +103,11 @@ static UIImage *settledCover(UIScrollView *list) {
         if (cell.hidden || ![cell isKindOfClass:UICollectionViewCell.class] || fabs(CGRectGetMidX(cell.frame) - middle) > 1) continue;
         UIView *holder = SGRFindByIdentifier(cell, @"Encore.ImageView", &kCoverImageKey);
         if (holder.bounds.size.width < kCoverMinWidth) return nil;
-        for (UIView *sub in holder.subviews) {
+        // The topmost picture is the one on screen: while a new cover comes in, the last one can still
+        // be under it at full alpha, and reading that one put the last track's cover behind this one.
+        for (UIView *sub in holder.subviews.reverseObjectEnumerator) {
             UIImageView *image = (UIImageView *)sub;
-            if ([sub isKindOfClass:UIImageView.class] && image.image && image.alpha > 0) return image.image;
+            if ([sub isKindOfClass:UIImageView.class] && !sub.hidden && image.image && image.alpha > 0) return image.image;
         }
         return nil;
     }
