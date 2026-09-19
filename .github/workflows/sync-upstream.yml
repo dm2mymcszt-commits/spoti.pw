@@ -1,5 +1,6 @@
 # Fork only: keeps `main` an exact copy of skopevoj/spoti.pw, replays this fork's own commits
-# (branch `mine`) on top of it, and builds an IPA from the result when anything changed.
+# (branch `mine`) on top of it, and builds the mod from the result when anything changed.
+# It publishes the mod's own files only (artifact `spoti-kit`), never an IPA.
 #
 # Secrets (Settings → Secrets and variables → Actions):
 #   SYNC_TOKEN  fine-grained token for this fork with Contents + Workflows read/write. The default
@@ -102,9 +103,24 @@ jobs:
 
       - run: make release
 
+      # This fork is public and anyone signed in can download its artifacts, so the injected IPA,
+      # which is Spotify's app, never leaves the runner. Only the mod's own build output is kept;
+      # scripts/inject-kit.py puts it into your IPA on your own computer.
+      - name: Collect the mod's files, drop the IPA
+        run: |
+          rm -f out/*.ipa ipa/*.ipa
+          mkdir -p kit
+          cp "$(ls -t tweak/packages/*.deb | head -1)" kit/
+          cp out/SpotifyGlassAppGroups.dylib kit/
+          cp -R out/extension/SpotifyGlassLiveActivity.appex kit/
+          cp -R out/extension/app/Metadata.appintents kit/
+          git rev-parse HEAD > kit/COMMIT
+          if find kit -iname '*.ipa' | grep -q .; then echo "::error::An IPA ended up in the kit"; exit 1; fi
+          ls -la kit
+
       - uses: actions/upload-artifact@v5
         with:
-          name: spoti-mine-ipa
-          path: out/*.ipa
+          name: spoti-kit
+          path: kit/
           retention-days: 7
           if-no-files-found: error
