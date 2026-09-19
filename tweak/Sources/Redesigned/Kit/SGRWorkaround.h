@@ -5,8 +5,8 @@
 // -preferredLayoutAttributesFittingAttributes: that the cell then re-applies in -layoutSubviews. On
 // iOS 17.0 the self-sizing pass keeps asking again, the main thread spins, and the watchdog kills
 // Spotify. Each part has its own switch, on until switched off, so the one that loops can be found:
-// while a part's switch is on its sections stay as Spotify lays them out, except the player's cards,
-// which are concealed instead (the list is pinned to its top, PlayerScroll.x, so nothing reaches them).
+// while a part's switch is on its sections stay as Spotify lays them out; the player keeps its cards and
+// scrolls down to them, and only its Lyrics preview is collapsed (PlayerCards.x, PlayerScroll.x).
 // From iOS 26 on there is no switch and every part resizes as it always has.
 #import "Settings/SGModPage.h"
 

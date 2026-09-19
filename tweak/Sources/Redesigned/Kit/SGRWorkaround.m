@@ -32,6 +32,6 @@ SGModSection *SGRWorkaroundSection(void) {
         row(@"Artist pages", @"The videos stay in the Music list", @"artist", @"music.mic"),
         row(@"Home", @"The sections the redesign drops stay", @"home", @"house"),
         row(@"Search", @"The carousels and promos stay above the categories", @"search", @"magnifyingglass"),
-        row(@"Player", @"The cards under the player are hidden without resizing them", @"player", @"play.rectangle"),
+        row(@"Player", @"The cards stay and the player scrolls down to them; only the Lyrics preview goes", @"player", @"play.rectangle"),
     ], @"Before iOS 26, hiding these sections by resizing them can freeze Spotify. A switch on keeps that part safe. Spotify quits when you flip one; open it again.");
 }

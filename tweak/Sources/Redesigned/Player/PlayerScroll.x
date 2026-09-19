@@ -20,6 +20,7 @@
 // under it. NPVScrollViewController is its delegate (:567).
 #import "Core/SGCore.h"
 #import "Redesigned/Kit/SGRKit.h"
+#import "Redesigned/Kit/SGRWorkaround.h"
 
 static NSString *const kListIdentifier = @"scrolling_npv_collection_view_accessibility_identifier";
 // Insets are never compared for equality, only for being a point or so out.
@@ -67,6 +68,8 @@ static void pinToTop(UIScrollView *list) {
 
 %ctor {
     if (!SGRedesignedUI()) return;
+    // Fork: with the Player workaround on the cards stay, and the list scrolls down to them.
+    if (!SGRResizesListCells(@"player")) return;
     %init;
     SGRequireClasses(@[@"_TtC21NowPlaying_ScrollImpl23NPVScrollViewController"]);
 }

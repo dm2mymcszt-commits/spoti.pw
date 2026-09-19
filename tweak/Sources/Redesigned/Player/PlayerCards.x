@@ -56,41 +56,34 @@ static BOOL isPlayerCard(UIView *content) {
 %end
 %end
 
-// The Workaround (Kit/SGRWorkaround.h): before iOS 26 a card keeps the height Spotify gives it and is
-// only made invisible and untouchable. The list is pinned to its top (PlayerScroll.x), so the cards
-// below the player are out of reach anyway; this takes away the one peeking in at the bottom. The
-// content view's alpha is used rather than the cell's, which the list sets from its layout attributes,
-// and a cell reused for anything else gets it back.
-static char kConcealedKey;
+// The Workaround (Kit/SGRWorkaround.h): before iOS 26 the cards stay and the player scrolls down to them
+// the way Spotify's does (PlayerScroll.x pins nothing then), and only the Lyrics preview card goes: the
+// redesign has the lyrics in the player itself (PlayerLyrics.x). It is collapsed the way every card is
+// otherwise, one card rather than all of them. Making the cards invisible instead left the Lyrics
+// preview's own grey backing on screen (device, 2026-09-19).
+//
+// Tree (lyrics/01.txt:996-999): the card's root under ElementContentView > ElementView is
+// Lyrics_CardElementImpl.CardView id=lyrics-card-view.
+static char kLyricsCardKey;
 
-static void conceal(UIView *cell) {
-    UIView *content = cell.subviews.firstObject;
-    BOOL card = content && isPlayerCard(content);
-    UIView *concealed = objc_getAssociatedObject(cell, &kConcealedKey);
-    if (concealed && concealed != content) {
-        concealed.alpha = 1;
-        cell.userInteractionEnabled = YES;
-        objc_setAssociatedObject(cell, &kConcealedKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    }
-    if (!card) return;
-    if (content.alpha != 0) content.alpha = 0;
-    cell.userInteractionEnabled = NO;
-    objc_setAssociatedObject(cell, &kConcealedKey, content, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-
-    static dispatch_once_t once;
-    dispatch_once(&once, ^{ SGLog(@"redesign player: cards concealed, not collapsed (workaround)"); });
+static BOOL isLyricsCard(UIView *cell, UIView *content) {
+    UIView *root = content.subviews.firstObject.subviews.firstObject;
+    if (root && [NSStringFromClass(root.class) containsString:@"Lyrics_Card"]) return YES;
+    return SGRFindByIdentifier(cell, @"lyrics-card-view", &kLyricsCardKey) != nil;
 }
 
-%group Conceal
+%group LyricsOnly
 %hook _TtC12Element_List18CollectionViewCell
-- (void)applyLayoutAttributes:(UICollectionViewLayoutAttributes *)attributes {
-    %orig;
-    conceal((UIView *)self);
-}
-
-- (void)layoutSubviews {
-    %orig;
-    conceal((UIView *)self);
+- (UICollectionViewLayoutAttributes *)preferredLayoutAttributesFittingAttributes:(UICollectionViewLayoutAttributes *)attributes {
+    UICollectionViewLayoutAttributes *result = %orig;
+    UIView *cell = (UIView *)self;
+    UIView *content = cell.subviews.firstObject;
+    if (!content || !isPlayerCard(content) || !isLyricsCard(cell, content)) return result;
+    result.size = CGSizeMake(result.size.width, 0);
+    cell.clipsToBounds = YES;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ SGLog(@"redesign player: the Lyrics preview collapsed, the other cards kept (workaround)"); });
+    return result;
 }
 %end
 %end
@@ -100,7 +93,7 @@ static void conceal(UIView *cell) {
     if (SGRResizesListCells(@"player")) {
         %init(Collapse);
     } else {
-        %init(Conceal);
+        %init(LyricsOnly);
     }
     SGRequireClasses(@[@"_TtC12Element_List18CollectionViewCell"]);
 }
