@@ -184,6 +184,7 @@ BOOL SGRHomeSectionCollapsed(UIView *cell) {
         @"ios-home-evopage-impl.interactive_entrypoint_enabled": @NO,
     });
     if (!SGRedesignedUI()) return;
+    if (!SGRResizesListCells()) return;
     %init;
     SGRequireClasses(@[
         @"_TtC12Element_List18CollectionViewCell",

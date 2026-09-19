@@ -14,6 +14,13 @@ static id forcedNow(NSString *key) {
     return value;
 }
 
+BOOL SGRResizesListCells(void) {
+    if (@available(iOS 26.0, *)) return YES;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ SGLog(@"redesign: list cells left at Spotify's size before iOS 26"); });
+    return NO;
+}
+
 void SGRedesignForceFlags(NSString *owner, NSDictionary<NSString *, id> *flags) {
     if (!flags.count) return;
     static dispatch_once_t once;
