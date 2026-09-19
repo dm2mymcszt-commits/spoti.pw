@@ -94,36 +94,61 @@ static SGRArtworkField *fieldIn(UIView *plane) {
 
 #pragma mark - the player's own cover
 
-// The picture of the cell under the middle of the list once it has settled: mid swipe the middle is
-// between two tracks.
-static UIImage *settledCover(UIScrollView *list) {
+// The image view of the cell under the middle of the list once it has settled (mid swipe the middle is
+// between two tracks), whether or not its picture has loaded: Encore.ImageView holds one UIImageView,
+// at alpha 0 under Encore's placeholder until the picture is in (device dump, 2026-09-19).
+static UIImageView *centredCover(UIScrollView *list) {
     if (!list.window || list.isDragging || list.isDecelerating) return nil;
     CGFloat middle = CGRectGetMidX(list.bounds);
     for (UIView *cell in list.subviews) {
         if (cell.hidden || ![cell isKindOfClass:UICollectionViewCell.class] || fabs(CGRectGetMidX(cell.frame) - middle) > 1) continue;
         UIView *holder = SGRFindByIdentifier(cell, @"Encore.ImageView", &kCoverImageKey);
         if (holder.bounds.size.width < kCoverMinWidth) return nil;
-        // The topmost picture is the one on screen: while a new cover comes in, the last one can still
-        // be under it at full alpha, and reading that one put the last track's cover behind this one.
         for (UIView *sub in holder.subviews.reverseObjectEnumerator) {
-            UIImageView *image = (UIImageView *)sub;
-            if ([sub isKindOfClass:UIImageView.class] && !sub.hidden && image.image && image.alpha > 0) return image.image;
+            if ([sub isKindOfClass:UIImageView.class]) return (UIImageView *)sub;
         }
         return nil;
     }
     return nil;
 }
 
+// The centred picture once it shows.
+static UIImageView *settledCover(UIImageView *view) {
+    return view && !view.hidden && view.image && view.alpha > 0 ? view : nil;
+}
+
+static char kCoverObservedKey;
+
+static void publishCover(void);
+
+// Fork: a cover from another album is often not loaded when the track changes, and arrives after the
+// watcher's last look (2.5 s) with a setImage: that lays nothing out, so the last album's picture stayed
+// behind the player. Every cover image view that has been under the middle is watched, loaded or not, and
+// a new picture in it is looked at as it lands and again once its fade in has run.
+static void watchCover(UIImageView *view) {
+    if (!view || objc_getAssociatedObject(view, &kCoverObservedKey)) return;
+    objc_setAssociatedObject(view, &kCoverObservedKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    SGRObserveImage(view, ^(UIImageView *changed) {
+        dispatch_async(dispatch_get_main_queue(), ^{ publishCover(); });
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.4 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{ publishCover(); });
+    });
+}
+
 static void publishCover(void) {
-    UIImage *cover = settledCover(sg_coverList);
+    UIImageView *centred = centredCover(sg_coverList);
+    watchCover(centred);
+    UIImage *cover = settledCover(centred).image;
     if (!cover) return;
     NSString *uri = SGURIString(SGPlayerState().track.URI);
-    if (!uri || (cover == sg_lastCover && [uri isEqualToString:sg_lastCoverURI])) return;
+    // The same picture as last time is either this track's again, or the last track's still on screen
+    // while the list has not moved on: either way nothing new, and published under a new track it would
+    // outrank the right picture when it comes (the Kit keeps a track's best quality).
+    if (!uri || cover == sg_lastCover) return;
     sg_lastCover = cover;
     sg_lastCoverURI = uri;
     SGRSetNowPlayingArtwork(cover, uri, SGRArtworkQualityHigh);
     static NSUInteger logged;
-    if (logged++ < 3) SGLog(@"redesign player: cover %.0fx%.0f published for %@", cover.size.width, cover.size.height, uri);
+    if (logged++ < 30) SGLog(@"redesign player: cover %.0fx%.0f published for %@", cover.size.width, cover.size.height, uri);
 }
 
 %hook _TtC35NowPlaying_ContentLayerPlatformImpl24AccessibleCollectionView
@@ -148,7 +173,7 @@ static void publishCover(void) {
     NSString *track = SGURIString(state.track.URI);
     if (!track || [track isEqualToString:_track]) return;
     _track = track;
-    for (NSNumber *delay in @[@0.3, @1, @2.5]) {
+    for (NSNumber *delay in @[@0.3, @1, @2.5, @5, @10]) {
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delay.doubleValue * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{ publishCover(); });
     }
 }
