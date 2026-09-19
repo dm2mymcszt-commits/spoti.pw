@@ -471,6 +471,14 @@ static void replace(void) {
 static SGRPlayerLyricsWatcher *sg_watcher;
 
 %ctor {
+    // Fork: Spotify's own lyrics in the player -- a Lyrics On/Off row in the more menu and lines under the
+    // cover -- are not drawn by the redesign, so turning them on only lifted the cover over an empty space
+    // (device dump, 2026-09-19). The footer's glyph is the way to the lyrics here. Registered whatever the
+    // switch says, like the other forced flags.
+    SGRedesignForceFlags(@"player lyrics", @{
+        @"ios-feature-lyrics.lyrics_context_menu_toggle_enabled": @NO,
+        @"ios-nowplaying-contentlayers-impl.lyrics_under_cover_art_enabled": @NO,
+    });
     if (!SGRedesignedUI()) return;
     %init;
     sg_watcher = [SGRPlayerLyricsWatcher new];
