@@ -2,9 +2,11 @@
 # Fork only. Builds the IPA on your own computer, inside WSL (Ubuntu), from the mod's files that the
 # "Sync upstream and build" workflow publishes (artifact spoti-kit). The IPA never goes to GitHub.
 #
-#   scripts/wsl-build.sh [decrypted.ipa]      (from the repo, inside WSL)
+#   scripts/wsl-build.sh [--dev] [decrypted.ipa]      (from the repo, inside WSL)
 #
-# The IPA defaults to the newest one in ipa/. Output: out/Spotify-<version>-mine.ipa.
+# The IPA defaults to the newest one in ipa/. Output: out/Spotify-<version>-mine.ipa, or -dev.ipa
+# with --dev, which adds FLEX (vendor/): a debug build, where a three-finger long press shares the
+# screen's view tree and the mod's log as a text file.
 # First run installs the tools (asks for your Linux password once, for apt). The kit is fetched
 # with Windows' gh.exe, so it uses the GitHub login you already have on Windows.
 # Mirrors the injection half of scripts/pipeline.sh; keep them in step.
@@ -36,6 +38,8 @@ fi
 command -v gh.exe >/dev/null || { echo "gh.exe not found: WSL can't see Windows' GitHub CLI (is Windows interop on?)" >&2; exit 1; }
 
 # ---- inputs ------------------------------------------------------------------------------------
+DEV=0
+if [ "${1:-}" = "--dev" ]; then DEV=1; shift; fi
 IN="${1:-$(ls -t "$ROOT"/ipa/*.ipa 2>/dev/null | head -1 || true)}"
 [ -n "$IN" ] && [ -f "$IN" ] || { echo "no IPA: put your decrypted Spotify .ipa in ipa/, or pass its path" >&2; exit 1; }
 IN="$(cd "$(dirname "$IN")" && pwd)/$(basename "$IN")"
@@ -70,13 +74,19 @@ chmod 755 "$APPEX/SpotifyGlassLiveActivity" "$GROUPS_DYLIB"
 # ---- inject ------------------------------------------------------------------------------------
 APP_DIR="$(unzip -Z1 "$IN" | grep -oE '^Payload/[^/]+\.app/' | sort -u | head -1)"
 VERSION="$(unzip -p "$IN" "${APP_DIR}Info.plist" | python3 -c 'import plistlib,sys; print(plistlib.loads(sys.stdin.buffer.read())["CFBundleShortVersionString"])')"
-OUT="$WORK/Spotify-$VERSION-mine.ipa"
-FINAL="$ROOT/out/Spotify-$VERSION-mine.ipa"
+SUFFIX=mine
+FLEX=()
+if [ "$DEV" = 1 ]; then
+  SUFFIX=dev
+  FLEX=("$ROOT/vendor/com.hopeless.autoflex_0.0.1_iphoneos-arm.deb")
+fi
+OUT="$WORK/Spotify-$VERSION-$SUFFIX.ipa"
+FINAL="$ROOT/out/Spotify-$VERSION-$SUFFIX.ipa"
 mkdir -p "$ROOT/out"
 
 echo "==> injecting into Spotify $VERSION"
 # -w drops the Watch app: its companion-app key would still name com.spotify.client and block the install.
-cyan -i "$IN" -o "$OUT" -f "$DEB" "$APPEX" "$GROUPS_DYLIB" -l "$ROOT/plist/liquid-glass.plist" -w -s --overwrite
+cyan -i "$IN" -o "$OUT" -f "$DEB" ${FLEX[@]+"${FLEX[@]}"} "$APPEX" "$GROUPS_DYLIB" -l "$ROOT/plist/liquid-glass.plist" -w -s --overwrite
 
 echo "==> loading the App Group shim in the home screen widget"
 WIDGET_BIN="${APP_DIR}PlugIns/WidgetExtension.appex/WidgetExtension"

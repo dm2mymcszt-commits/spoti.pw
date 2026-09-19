@@ -6,6 +6,8 @@
 #import <sys/socket.h>
 #import <netinet/in.h>
 #import <unistd.h>
+#import <dlfcn.h>
+#import <objc/message.h>
 
 static const uint16_t kTreePort = 8085;
 
@@ -142,6 +144,79 @@ static void startTreeServer(void) {
     SGLog(@"tree server on 127.0.0.1:%u; on the Mac: iproxy %u:%u, then GET http://127.0.0.1:%u/tree", kTreePort, kTreePort, kTreePort, kTreePort);
 }
 
+#pragma mark - fork: a dump to share, without a Mac
+
+// The last ten minutes of this process's [spotifyglass] lines, read back from the unified log through
+// OSLogStore (iOS 15+), looked up at run time since the tweak doesn't link OSLog.framework.
+static NSString *recentLog(void) {
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ dlopen("/System/Library/Frameworks/OSLog.framework/OSLog", RTLD_LAZY); });
+    Class storeClass = NSClassFromString(@"OSLogStore");
+    if (!storeClass) return @"OSLogStore unavailable\n";
+    NSError *error = nil;
+    // OSLogStoreCurrentProcessIdentifier
+    id store = ((id (*)(Class, SEL, NSInteger, NSError **))objc_msgSend)(storeClass, NSSelectorFromString(@"storeWithScope:error:"), 1, &error);
+    if (!store) return [NSString stringWithFormat:@"no log store: %@\n", error];
+    id position = ((id (*)(id, SEL, NSTimeInterval))objc_msgSend)(store, NSSelectorFromString(@"positionWithTimeIntervalSinceEnd:"), -600);
+    NSEnumerator *entries = ((id (*)(id, SEL, NSUInteger, id, id, NSError **))objc_msgSend)(store,
+        NSSelectorFromString(@"entriesEnumeratorWithOptions:position:predicate:error:"), 0, position, nil, &error);
+    if (!entries) return [NSString stringWithFormat:@"no log entries: %@\n", error];
+    NSDateFormatter *format = [NSDateFormatter new];
+    format.dateFormat = @"HH:mm:ss.SSS";
+    NSMutableString *out = [NSMutableString string];
+    for (id entry in entries) {
+        NSString *message = [entry valueForKey:@"composedMessage"];
+        if (![message containsString:@"[spotifyglass]"]) continue;
+        [out appendFormat:@"%@ %@\n", [format stringFromDate:[entry valueForKey:@"date"]], message];
+    }
+    return out;
+}
+
+static UIViewController *topController(UIWindow *window) {
+    UIViewController *top = window.rootViewController;
+    while (top.presentedViewController && !top.presentedViewController.isBeingDismissed) top = top.presentedViewController;
+    return top;
+}
+
+// A three-finger long press anywhere: the screen as it is and the log so far go into one text file,
+// handed to the share sheet so it can be saved or sent to a computer. Nothing listens on the network.
+@interface SGDumpPress : NSObject
+@end
+
+@implementation SGDumpPress
++ (void)pressed:(UILongPressGestureRecognizer *)press {
+    if (press.state != UIGestureRecognizerStateBegan) return;
+    UIWindow *window = (UIWindow *)press.view;
+    NSString *tree = SGScreenTree();
+    NSDateFormatter *format = [NSDateFormatter new];
+    format.dateFormat = @"yyyyMMdd-HHmmss";
+    NSString *name = [NSString stringWithFormat:@"spoti-dump-%@.txt", [format stringFromDate:NSDate.date]];
+    NSURL *file = [NSURL fileURLWithPath:[NSTemporaryDirectory() stringByAppendingPathComponent:name]];
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        NSString *text = [NSString stringWithFormat:@"%@\n== log (last 10 min)\n%@", tree, recentLog()];
+        [text writeToURL:file atomically:YES encoding:NSUTF8StringEncoding error:nil];
+        dispatch_async(dispatch_get_main_queue(), ^{
+            UIActivityViewController *share = [[UIActivityViewController alloc] initWithActivityItems:@[file] applicationActivities:nil];
+            UIViewController *top = topController(window);
+            share.popoverPresentationController.sourceView = top.view;
+            [top presentViewController:share animated:YES completion:nil];
+        });
+    });
+    SGLog(@"dump: %@ shared", name);
+}
+@end
+
+static void addDumpPress(UIWindow *window) {
+    static char kPressKey;
+    if (!window || objc_getAssociatedObject(window, &kPressKey)) return;
+    UILongPressGestureRecognizer *press = [[UILongPressGestureRecognizer alloc] initWithTarget:SGDumpPress.class action:@selector(pressed:)];
+    press.numberOfTouchesRequired = 3;
+    press.minimumPressDuration = 1.0;
+    press.cancelsTouchesInView = NO;
+    [window addGestureRecognizer:press];
+    objc_setAssociatedObject(window, &kPressKey, press, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+}
+
 %hook _TtC21NowPlaying_ScrollImpl23NPVScrollViewController
 - (void)viewDidAppear:(BOOL)animated {
     %orig;
@@ -164,6 +239,9 @@ static void startTreeServer(void) {
             SGDumpScreen(@"on background");
         }];
         startTreeServer();
-        SGLog(@"debug build: backgrounding the app dumps the visible screen's view tree");
+        [NSNotificationCenter.defaultCenter addObserverForName:UIWindowDidBecomeKeyNotification object:nil queue:nil usingBlock:^(NSNotification *note) {
+            addDumpPress(note.object);
+        }];
+        SGLog(@"debug build: backgrounding the app dumps the visible screen's view tree; a three-finger long press shares it with the log");
     }
 }
