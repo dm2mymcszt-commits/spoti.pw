@@ -1,0 +1,110 @@
+# Fork only: keeps `main` an exact copy of skopevoj/spoti.pw, replays this fork's own commits
+# (branch `mine`) on top of it, and builds an IPA from the result when anything changed.
+#
+# Secrets (Settings → Secrets and variables → Actions):
+#   SYNC_TOKEN  fine-grained token for this fork with Contents + Workflows read/write. The default
+#               GITHUB_TOKEN can't push commits that touch .github/workflows, and upstream's do.
+#   IPA_URL     direct link to the decrypted Spotify IPA the build injects into.
+#
+# If one of `mine`'s commits no longer applies on top of upstream, the run fails and changes
+# nothing; GitHub emails you about the failed run. Resolve the rebase by hand, then run it again.
+name: Sync upstream and build
+
+on:
+  schedule:
+    - cron: "17 5 * * *"   # daily, 05:17 UTC
+  workflow_dispatch:
+    inputs:
+      force_build:
+        description: "Build even if nothing changed"
+        type: boolean
+        default: false
+
+concurrency:
+  group: sync-upstream
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    outputs:
+      changed: ${{ steps.rebase.outputs.changed }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: mine
+          fetch-depth: 0
+          token: ${{ secrets.SYNC_TOKEN }}
+
+      - name: Fetch upstream
+        run: |
+          git remote add upstream https://github.com/skopevoj/spoti.pw.git
+          git fetch --no-tags upstream main
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Fast-forward main to upstream
+        run: git push origin upstream/main:refs/heads/main
+
+      - name: Replay mine on top of upstream
+        id: rebase
+        run: |
+          before=$(git rev-parse HEAD)
+          if ! git rebase upstream/main; then
+            git rebase --abort
+            echo "::error::A commit on 'mine' conflicts with upstream. Nothing was pushed to 'mine'; rebase it by hand."
+            exit 1
+          fi
+          after=$(git rev-parse HEAD)
+          if [ "$before" = "$after" ]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "Already up to date with upstream." >> "$GITHUB_STEP_SUMMARY"
+          else
+            git push --force-with-lease=mine:"$before" origin HEAD:mine
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "### Synced with upstream" >> "$GITHUB_STEP_SUMMARY"
+            git log --oneline "$before..$after" -- . ':!.github' | head -30 | sed 's/^/- /' >> "$GITHUB_STEP_SUMMARY" || true
+          fi
+
+  build:
+    needs: sync
+    if: needs.sync.outputs.changed == 'true' || inputs.force_build
+    runs-on: macos-latest
+    env:
+      THEOS: ${{ github.workspace }}/theos
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: mine
+
+      - uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - uses: actions/checkout@v5
+        with:
+          repository: theos/theos
+          path: theos
+          submodules: recursive
+
+      - name: Install tools
+        run: |
+          brew install make dpkg ldid
+          python3 -m pip install --break-system-packages git+https://github.com/asdfzxcvbn/pyzule-rw.git
+
+      - name: Download IPA
+        env:
+          IPA_URL: ${{ secrets.IPA_URL }}
+        run: |
+          mkdir -p ipa
+          curl -fsSL "$IPA_URL" -o ipa/spotify.ipa
+          case "$(file --mime-type -b ipa/spotify.ipa)" in application/zip|application/x-ios-app) ;; *) echo "::error::Not an IPA"; exit 1 ;; esac
+
+      - run: make release
+
+      - uses: actions/upload-artifact@v5
+        with:
+          name: spoti-mine-ipa
+          path: out/*.ipa
+          retention-days: 7
+          if-no-files-found: error
