@@ -17,9 +17,9 @@
 #import "Core/SGCore.h"
 #import "Redesigned/Kit/SGRKit.h"
 #import "Shared/AdBlock/AdBlock.h"
+#import "Plan.h"
 
 static char kBadgeLabelKey, kFillKey, kLabelObservedKey;
-static NSString *const kPremiumText = @"Spotify Premium";
 
 // Spotify's green, #1ED760.
 static UIColor *green(CGFloat alpha) {
@@ -43,27 +43,6 @@ static UIColor *green(CGFloat alpha) {
 
 @end
 
-// Spotify's label is an SPTEncoreLabel around a UILabel. Only the UILabel is written, through UIKit's own
-// attributedText with the attributes Spotify set on its first character, so the font, colour and tracking
-// stay Spotify's. The SPTEncoreLabel's own -setText: takes something other than an NSString: handed one it
-// raised an unrecognized selector inside SpotifyShared the moment the drawer opened (device crash log,
-// 2026-09-19), so nothing of its API is called.
-static void writePremium(UIView *label) {
-    SGForEachView(label, ^(UIView *v) {
-        if (![v isKindOfClass:UILabel.class]) return;
-        UILabel *inner = (UILabel *)v;
-        NSAttributedString *current = inner.attributedText;
-        if ([current.string isEqualToString:kPremiumText]) return;
-        NSDictionary *attributes = current.length ? [current attributesAtIndex:0 effectiveRange:NULL] : @{};
-        inner.attributedText = [[NSAttributedString alloc] initWithString:kPremiumText attributes:attributes];
-        [inner invalidateIntrinsicContentSize];
-        [label invalidateIntrinsicContentSize];
-        [label setNeedsLayout];
-        [label.superview setNeedsLayout];
-        [label.superview.superview setNeedsLayout];
-    });
-}
-
 static void premium(UIView *container) {
     UIView *label = SGRFindByIdentifier(container, @"Components.UI.SideDrawer.BadgeLabel", &kBadgeLabelKey);
     UIView *badge = label.superview;
@@ -80,10 +59,10 @@ static void premium(UIView *container) {
     if (!CGRectEqualToRect(fill.frame, badge.bounds)) fill.frame = badge.bounds;
     if (!badge.clipsToBounds) badge.clipsToBounds = YES;
 
-    writePremium(label);
+    SGRWritePlanName(label);
     if (!objc_getAssociatedObject(label, &kLabelObservedKey)) {
         objc_setAssociatedObject(label, &kLabelObservedKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-        SGRObserveLayout(label, ^(UIView *view) { writePremium(view); });
+        SGRObserveLayout(label, ^(UIView *view) { SGRWritePlanName(view); });
     }
 }
 
