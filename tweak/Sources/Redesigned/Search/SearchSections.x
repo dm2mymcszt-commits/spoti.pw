@@ -22,6 +22,7 @@
 // inset, which its collapsing header is worked out from, stays its own.
 #import "Core/SGCore.h"
 #import "Redesigned/Kit/SGRKit.h"
+#import "Redesigned/Kit/SGRWorkaround.h"
 #import "Search.h"
 
 NSString *const SGRSearchListIdentifier = @"BrowsePage.ContentScrollView";
@@ -207,7 +208,7 @@ static void measureSoon(void) {
 
 %ctor {
     if (!SGRedesignedUI()) return;
-    if (!SGRResizesListCells()) return;
+    if (!SGRResizesListCells(@"search")) return;
     %init;
     SGRequireClasses(@[@"_TtC12Element_List18CollectionViewCell"]);
 }

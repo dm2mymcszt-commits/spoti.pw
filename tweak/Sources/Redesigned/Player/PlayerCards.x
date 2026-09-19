@@ -15,6 +15,7 @@
 // (WatchFeed's) name WatchFeed_ComponentAPI instead, so they are left to their card.
 #import "Core/SGCore.h"
 #import "Redesigned/Kit/SGRKit.h"
+#import "Redesigned/Kit/SGRWorkaround.h"
 #import "Player.h"
 
 // Whether the cell's content is the player's card list, remembered per content class.
@@ -32,6 +33,7 @@ static BOOL isPlayerCard(UIView *content) {
     return player;
 }
 
+%group Collapse
 %hook _TtC12Element_List18CollectionViewCell
 - (UICollectionViewLayoutAttributes *)preferredLayoutAttributesFittingAttributes:(UICollectionViewLayoutAttributes *)attributes {
     UICollectionViewLayoutAttributes *result = %orig;
@@ -52,10 +54,53 @@ static BOOL isPlayerCard(UIView *content) {
     return result;
 }
 %end
+%end
+
+// The Workaround (Kit/SGRWorkaround.h): before iOS 26 a card keeps the height Spotify gives it and is
+// only made invisible and untouchable. The list is pinned to its top (PlayerScroll.x), so the cards
+// below the player are out of reach anyway; this takes away the one peeking in at the bottom. The
+// content view's alpha is used rather than the cell's, which the list sets from its layout attributes,
+// and a cell reused for anything else gets it back.
+static char kConcealedKey;
+
+static void conceal(UIView *cell) {
+    UIView *content = cell.subviews.firstObject;
+    BOOL card = content && isPlayerCard(content);
+    UIView *concealed = objc_getAssociatedObject(cell, &kConcealedKey);
+    if (concealed && concealed != content) {
+        concealed.alpha = 1;
+        cell.userInteractionEnabled = YES;
+        objc_setAssociatedObject(cell, &kConcealedKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
+    if (!card) return;
+    if (content.alpha != 0) content.alpha = 0;
+    cell.userInteractionEnabled = NO;
+    objc_setAssociatedObject(cell, &kConcealedKey, content, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ SGLog(@"redesign player: cards concealed, not collapsed (workaround)"); });
+}
+
+%group Conceal
+%hook _TtC12Element_List18CollectionViewCell
+- (void)applyLayoutAttributes:(UICollectionViewLayoutAttributes *)attributes {
+    %orig;
+    conceal((UIView *)self);
+}
+
+- (void)layoutSubviews {
+    %orig;
+    conceal((UIView *)self);
+}
+%end
+%end
 
 %ctor {
     if (!SGRedesignedUI()) return;
-    if (!SGRResizesListCells()) return;
-    %init;
+    if (SGRResizesListCells(@"player")) {
+        %init(Collapse);
+    } else {
+        %init(Conceal);
+    }
     SGRequireClasses(@[@"_TtC12Element_List18CollectionViewCell"]);
 }

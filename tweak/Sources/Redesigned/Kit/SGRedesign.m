@@ -14,16 +14,6 @@ static id forcedNow(NSString *key) {
     return value;
 }
 
-BOOL SGRResizesListCells(void) {
-    if (@available(iOS 26.0, *)) return YES;
-    BOOL fix = SGEnabled(SGRKeyListFreezeFix);
-    static dispatch_once_t once;
-    dispatch_once(&once, ^{
-        SGLog(@"redesign: %@", fix ? @"list cells left at Spotify's size before iOS 26" : @"list freeze fix off, list cells resized");
-    });
-    return !fix;
-}
-
 void SGRedesignForceFlags(NSString *owner, NSDictionary<NSString *, id> *flags) {
     if (!flags.count) return;
     static dispatch_once_t once;

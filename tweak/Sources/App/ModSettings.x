@@ -21,6 +21,7 @@
 #import "Shared/Flags/Flags.h"
 #import "Shared/JamesDSP/JamesDSPPage.h"
 #import "Shared/LiveActivity/LiveActivity.h"
+#import "Redesigned/Kit/SGRWorkaround.h"
 #import "App/About/About.h"
 #import "App/Donate/Donate.h"
 #import "Pages.h"
@@ -59,8 +60,11 @@ static UIViewController *modSettingsPage(void) {
         [parts addObject:liveActivity];
     }
     if (!SGRedesignedUIStored()) [parts addObject:pageRow(@"Home & Library", @"house", ^UIViewController *{ return SGHomeSettingsPage(); })];
+    [sections addObject:SGAppearanceSection()];
+    // Fork only: the pre-iOS 26 freeze workarounds, under the look they belong to.
+    SGModSection *workaround = SGRedesignedUIStored() ? SGRWorkaroundSection() : nil;
+    if (workaround) [sections addObject:workaround];
     [sections addObjectsFromArray:@[
-        SGAppearanceSection(),
         SGSection(nil, parts),
         SGSection(nil, @[
             pageRow(@"Premium, ads & privacy", @"crown", ^UIViewController *{ return SGAdsSettingsPage(); }),

@@ -26,6 +26,7 @@
 // does not reach. Taking the sections out of the casita feed itself is what would close it.
 #import "Core/SGCore.h"
 #import "Redesigned/Kit/SGRKit.h"
+#import "Redesigned/Kit/SGRWorkaround.h"
 #import "Home.h"
 
 typedef NS_ENUM(NSInteger, SGRHomeKind) {
@@ -184,7 +185,7 @@ BOOL SGRHomeSectionCollapsed(UIView *cell) {
         @"ios-home-evopage-impl.interactive_entrypoint_enabled": @NO,
     });
     if (!SGRedesignedUI()) return;
-    if (!SGRResizesListCells()) return;
+    if (!SGRResizesListCells(@"home")) return;
     %init;
     SGRequireClasses(@[
         @"_TtC12Element_List18CollectionViewCell",

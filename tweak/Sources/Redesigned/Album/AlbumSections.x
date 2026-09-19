@@ -20,6 +20,7 @@
 // kept cells are given the gap the spacers used to draw and their content is pinned under it.
 #import "Core/SGCore.h"
 #import "Redesigned/Kit/SGRKit.h"
+#import "Redesigned/Kit/SGRWorkaround.h"
 #import "Album.h"
 
 // Over the album's own line, and between it and the copyright: the spacers they sat between are gone.
@@ -126,7 +127,7 @@ static void logOnce(NSString *what) {
 
 %ctor {
     if (!SGRedesignedUI()) return;
-    if (!SGRResizesListCells()) return;
+    if (!SGRResizesListCells(@"album")) return;
     %init;
     SGRequireClasses(@[@"_TtC12Element_List18CollectionViewCell"]);
 }

@@ -17,6 +17,7 @@
 // cell: content squeezed to 0 breaks Spotify's required constraints on every pass (Album/AlbumSections.x).
 #import "Core/SGCore.h"
 #import "Redesigned/Kit/SGRKit.h"
+#import "Redesigned/Kit/SGRWorkaround.h"
 #import "Artist.h"
 
 static char kSettledKey, kKindsKey, kDroppedKey;
@@ -181,7 +182,7 @@ static void logOnce(NSString *what) {
 
 %ctor {
     if (!SGRedesignedUI()) return;
-    if (!SGRResizesListCells()) return;
+    if (!SGRResizesListCells(@"artist")) return;
     %init;
     SGRequireClasses(@[@"_TtC12Element_List18CollectionViewCell"]);
 }
