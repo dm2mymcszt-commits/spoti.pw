@@ -1,7 +1,8 @@
 // Fork: the side drawer's plan badge on green glass while Spoof Premium is on. Spotify still draws it as a
 // grey rounded rectangle reading "Spotify Free"; it becomes a capsule of glass with a film of Spotify's green
 // in it, a green hairline and a soft green glow, and the text goes white. Before iOS 26 the glass is a dark
-// ultra thin blur, from iOS 26 Liquid Glass tinted green. Spotify's text is left as it is.
+// ultra thin blur, from iOS 26 Liquid Glass tinted green. The text reads "Spotify Premium", which is what
+// the spoof makes the account; Spotify's own label is written, so the badge widens as it would for Premium.
 //
 // Tree (device dump, 2026-09-19): Element_List.CollectionViewCell 385x48 > ElementContentView > ElementView >
 // SubscriptionManagement_YourPlanSideDrawerPluginImpl.YourPlanSideDrawerItemContainerView 385x48 > UIView >
@@ -39,6 +40,31 @@ static UIVisualEffectView *glassIn(UIView *badge) {
     [glass.contentView addSubview:film];
     objc_setAssociatedObject(badge, &kGlassKey, glass, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     return glass;
+}
+
+static NSString *const kPremiumText = @"Spotify Premium";
+
+// Spotify's label is an SPTEncoreLabel around a UILabel; its own text is set when it has a setter, so its
+// size and the badge's follow, and the inner label's otherwise.
+static void writePremium(UIView *label) {
+    if ([label respondsToSelector:@selector(text)] && [label respondsToSelector:@selector(setText:)]) {
+        if (![[(id)label text] isEqual:kPremiumText]) {
+            [(id)label setText:kPremiumText];
+            [label invalidateIntrinsicContentSize];
+            [label.superview setNeedsLayout];
+            [label.superview.superview setNeedsLayout];
+        }
+        return;
+    }
+    SGForEachView(label, ^(UIView *v) {
+        if (![v isKindOfClass:UILabel.class]) return;
+        UILabel *inner = (UILabel *)v;
+        if (![inner.text isEqualToString:kPremiumText]) {
+            inner.text = kPremiumText;
+            [label invalidateIntrinsicContentSize];
+            [label.superview.superview setNeedsLayout];
+        }
+    });
 }
 
 static void styleBadge(UIView *badge) {
@@ -79,12 +105,17 @@ static void style(UIView *container) {
     UIView *label = SGRFindByIdentifier(container, @"Components.UI.SideDrawer.BadgeLabel", &kBadgeLabelKey);
     UIView *badge = label.superview;
     if (!badge) return;
+    writePremium(label);
     styleBadge(badge);
     // The badge fills in after the row first lays out (a shimmer stands in while the plan loads), and
     // Spotify's text and colour come with it, so it is styled again on each pass of its own.
     if (!objc_getAssociatedObject(badge, &kObservedKey)) {
         objc_setAssociatedObject(badge, &kObservedKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-        SGRObserveLayout(badge, ^(UIView *view) { styleBadge(view); });
+        __weak UIView *weakLabel = label;
+        SGRObserveLayout(badge, ^(UIView *view) {
+            if (weakLabel) writePremium(weakLabel);
+            styleBadge(view);
+        });
     }
 }
 
