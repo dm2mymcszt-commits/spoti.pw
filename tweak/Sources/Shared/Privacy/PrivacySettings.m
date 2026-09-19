@@ -4,6 +4,7 @@
 SGModSection *SGPrivacySection(void) {
     return SGSection(@"Privacy", @[
         SGWithSymbol(SGSwitchRow(@"Block telemetry", @"Spotify's own events still go out, since Recents is built from them", SGKeyBlockTelemetry), @"antenna.radiowaves.left.and.right.slash"),
+        SGWithSymbol(SGOptionRow(@"Ignore screenshots", @"Spotify never hears of a screenshot, so no share sheet pops up", SGKeyIgnoreScreenshots), @"camera.viewfinder"),
     ]);
 }
 
