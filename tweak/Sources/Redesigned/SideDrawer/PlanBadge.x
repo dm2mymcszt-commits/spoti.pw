@@ -68,23 +68,23 @@ static UIColor *green(CGFloat alpha) {
 
 @end
 
-// Spotify's label is an SPTEncoreLabel around a UILabel: its own text is set when it has a setter, so
-// its size and the badge's follow, and the inner label's otherwise.
+// Spotify's label is an SPTEncoreLabel around a UILabel. Only the UILabel is written, through UIKit's own
+// attributedText with the attributes Spotify set on its first character, so the font, colour and tracking
+// stay Spotify's. The SPTEncoreLabel's own -setText: takes something other than an NSString: handed one it
+// raised an unrecognized selector inside SpotifyShared the moment the drawer opened (device crash log,
+// 2026-09-19), so nothing of its API is called.
 static void writePremium(UIView *label) {
-    if ([label respondsToSelector:@selector(text)] && [label respondsToSelector:@selector(setText:)]) {
-        if (![[(id)label text] isEqual:kPremiumText]) {
-            [(id)label setText:kPremiumText];
-            [label invalidateIntrinsicContentSize];
-            [label.superview.superview setNeedsLayout];
-        }
-        return;
-    }
     SGForEachView(label, ^(UIView *v) {
         if (![v isKindOfClass:UILabel.class]) return;
         UILabel *inner = (UILabel *)v;
-        if ([inner.text isEqualToString:kPremiumText]) return;
-        inner.text = kPremiumText;
+        NSAttributedString *current = inner.attributedText;
+        if ([current.string isEqualToString:kPremiumText]) return;
+        NSDictionary *attributes = current.length ? [current attributesAtIndex:0 effectiveRange:NULL] : @{};
+        inner.attributedText = [[NSAttributedString alloc] initWithString:kPremiumText attributes:attributes];
+        [inner invalidateIntrinsicContentSize];
         [label invalidateIntrinsicContentSize];
+        [label setNeedsLayout];
+        [label.superview setNeedsLayout];
         [label.superview.superview setNeedsLayout];
     });
 }
