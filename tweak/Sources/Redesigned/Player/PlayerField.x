@@ -22,6 +22,7 @@
 #import "Settings/SGModPage.h"
 #import "Redesigned/Kit/SGRKit.h"
 #import "Player.h"
+#import "Redesigned/Canvas/Canvas.h"
 
 // Past the plane's edges: above for the pull that dismisses the player, below for the bounce at the end
 // of the cards.
@@ -185,8 +186,6 @@ static SGRPlayerCoverWatcher *sg_coverWatcher;
 %ctor {
     // Registered whatever the switch says: the flag rows elsewhere lock to these while it is on.
     NSMutableDictionary<NSString *, id> *flags = [@{
-        // The artwork is the picture; Canvas video would cover the field and the corners.
-        @"ios-feature-canvas.canvas_enabled": @NO,
         // The header, slider and sheets the trees were recorded with (trees/clean/player/01.txt:122
         // id=Context menu, :216 SPTNowPlayingSliderV2).
         @"ios-feature-nowplaying.new_redesign_header_with_context_menu_enabled": @YES,
@@ -204,6 +203,9 @@ static SGRPlayerCoverWatcher *sg_coverWatcher;
                             @"world_cup_easter_egg"]) {
         flags[[@"ios-feature-nowplaying." stringByAppendingString:egg]] = @NO;
     }
+    // The artwork is the picture; Canvas video would cover the field and the corners. Fork: unless the
+    // Canvas switch is on (Redesigned/Canvas), which leaves the flag to Spotify.
+    if (!SGHidden(SGRKeyCanvas)) flags[@"ios-feature-canvas.canvas_enabled"] = @NO;
     SGRedesignForceFlags(@"player", flags);
     if (!SGRedesignedUI()) return;
     %init;

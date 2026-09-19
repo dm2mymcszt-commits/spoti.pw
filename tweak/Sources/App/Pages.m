@@ -13,6 +13,7 @@
 #import "Shared/Haptics/Haptics.h"
 #import "Shared/LiveActivity/LiveActivity.h"
 #import "Redesigned/Lyrics/LyricsText.h"
+#import "Redesigned/Canvas/Canvas.h"
 #import "Redesigned/Navbar/Navbar.h"
 #import "Redesigned/NowPlayingBar/NowPlayingBar.h"
 #import "Redesigned/Kit/SGRAccent.h"
@@ -106,6 +107,8 @@ UIViewController *SGPlayerSettingsPage(void) {
     if (native) [sections addObjectsFromArray:SGNativePlayerScreenSections()];
     // Vibrations hook Spotify's own controls and its audio, so they answer under either look.
     [sections addObjectsFromArray:SGVibrationsSections()];
+    // Fork only: Canvas is the redesign's to draw, so its switch shows with the redesign.
+    if (!native) [sections addObject:SGRCanvasSection()];
 
     return [[SGModPage alloc] initWithTitle:@"Player" intro:SGRestartNote sections:sections footer:nil];
 }
