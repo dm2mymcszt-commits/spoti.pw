@@ -164,11 +164,26 @@ static NSString *recentLog(void) {
     NSDateFormatter *format = [NSDateFormatter new];
     format.dateFormat = @"HH:mm:ss.SSS";
     NSMutableString *out = [NSMutableString string];
+    // Spotify's and the system's own lines about video too (Canvas and the players under the player froze on
+    // their first frame on iOS 17, with every switch off): what the process logged about playing, caching or
+    // being refused a video, the last 400 of them.
+    static NSRegularExpression *video;
+    if (!video) video = [NSRegularExpression regularExpressionWithPattern:@"video|canvas|betamax|kubrick|avplayer|avasset|avfoundation|coremedia|hls|mp4|cnvs|sandbox|deny|app ?group|container|cache.*(error|fail)" options:NSRegularExpressionCaseInsensitive error:nil];
+    NSMutableArray<NSString *> *others = [NSMutableArray array];
     for (id entry in entries) {
         NSString *message = [entry valueForKey:@"composedMessage"];
-        if (![message containsString:@"[spotifyglass]"]) continue;
-        [out appendFormat:@"%@ %@\n", [format stringFromDate:[entry valueForKey:@"date"]], message];
+        if (!message.length) continue;
+        NSString *when = [format stringFromDate:[entry valueForKey:@"date"]];
+        if ([message containsString:@"[spotifyglass]"]) {
+            [out appendFormat:@"%@ %@\n", when, message];
+            continue;
+        }
+        if (![video firstMatchInString:message options:0 range:NSMakeRange(0, message.length)]) continue;
+        NSString *subsystem = [entry respondsToSelector:NSSelectorFromString(@"subsystem")] ? [entry valueForKey:@"subsystem"] : nil;
+        [others addObject:[NSString stringWithFormat:@"%@ [%@] %@", when, subsystem.length ? subsystem : @"-", message]];
+        if (others.count > 400) [others removeObjectAtIndex:0];
     }
+    [out appendFormat:@"\n== video and cache lines of the process (last 10 min, %lu)\n%@\n", (unsigned long)others.count, [others componentsJoinedByString:@"\n"]];
     return out;
 }
 
