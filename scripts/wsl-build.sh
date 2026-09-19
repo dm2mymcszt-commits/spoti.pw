@@ -48,9 +48,15 @@ RUN_ID="$(gh.exe run list -R "$REPO" -w "Sync upstream and build" -b mine -s suc
     fi
   done)"
 [ -n "$RUN_ID" ] || { echo "no unexpired spoti-kit artifact: run the Sync upstream and build workflow with force build on" >&2; exit 1; }
-KIT="$ROOT/out/kit"
-rm -rf "$KIT" && mkdir -p "$KIT"
-gh.exe run download "$RUN_ID" -R "$REPO" -n spoti-kit -D "$(wslpath -w "$KIT")"
+# gh.exe can only write to a Windows path, and permissions can't be set on /mnt/c, so the kit is
+# downloaded to out/kit and then worked on from a copy in Linux's own file system.
+DL="$ROOT/out/kit"
+rm -rf "$DL" && mkdir -p "$DL"
+gh.exe run download "$RUN_ID" -R "$REPO" -n spoti-kit -D "$(wslpath -w "$DL")"
+WORK="$TOOLS/work"
+KIT="$WORK/kit"
+rm -rf "$WORK" && mkdir -p "$WORK"
+cp -r "$DL" "$KIT"
 echo "    run $RUN_ID, commit $(tr -d '\r\n' < "$KIT/COMMIT" | cut -c1-7)"
 
 DEB="$(ls "$KIT"/*.deb | head -1)"
@@ -59,13 +65,13 @@ GROUPS_DYLIB="$KIT/SpotifyGlassAppGroups.dylib"
 INTENTS="$KIT/Metadata.appintents"
 # Artifacts don't keep the executable bit.
 find "$KIT" -type f -exec chmod 644 {} + && find "$KIT" -type d -exec chmod 755 {} +
-[ -f "$APPEX/SpotifyGlassLiveActivity" ] && chmod 755 "$APPEX/SpotifyGlassLiveActivity"
-chmod 755 "$GROUPS_DYLIB"
+chmod 755 "$APPEX/SpotifyGlassLiveActivity" "$GROUPS_DYLIB"
 
 # ---- inject ------------------------------------------------------------------------------------
 APP_DIR="$(unzip -Z1 "$IN" | grep -oE '^Payload/[^/]+\.app/' | sort -u | head -1)"
-VERSION="$(unzip -p "$IN" "${APP_DIR}Info.plist" | python3 -c 'import plistlib,sys; print(plistlib.load(sys.stdin.buffer)["CFBundleShortVersionString"])')"
-OUT="$ROOT/out/Spotify-$VERSION-mine.ipa"
+VERSION="$(unzip -p "$IN" "${APP_DIR}Info.plist" | python3 -c 'import plistlib,sys; print(plistlib.loads(sys.stdin.buffer.read())["CFBundleShortVersionString"])')"
+OUT="$WORK/Spotify-$VERSION-mine.ipa"
+FINAL="$ROOT/out/Spotify-$VERSION-mine.ipa"
 mkdir -p "$ROOT/out"
 
 echo "==> injecting into Spotify $VERSION"
@@ -90,5 +96,6 @@ fi
 echo "==> adding the Live Activity intents to Spotify's App Intents metadata"
 python3 "$ROOT/scripts/merge-appintents.py" "$OUT" "$APP_DIR" "$INTENTS"
 
-echo "==> done: $OUT"
-echo "    Windows path: $(wslpath -w "$OUT")"
+cp "$OUT" "$FINAL"
+rm -rf "$WORK"
+echo "==> done: $(wslpath -w "$FINAL")"
