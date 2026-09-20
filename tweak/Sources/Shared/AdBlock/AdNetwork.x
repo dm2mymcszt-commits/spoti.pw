@@ -9,7 +9,7 @@
 #import "Core/SGCore.h"
 #import "AdBlock.h"
 
-static BOOL ads, premium;
+static BOOL ads, premium, upsells;
 static NSDate *started;
 static NSObject *cacheLock;
 static NSData *cachedCustomize;   // the last rewritten customize body, for a 304 and the re-fetches
@@ -69,10 +69,21 @@ static BOOL isRefetch(NSString *path) {
         || has(path, @"pushka-tokens") || has(path, @"apresolve") || has(path, @"pses/screenconfig") || isCustomize(path);
 }
 
+// Fork: the in-app messages Spotify pushes, which is what the full screen "Rejoin Premium" page at
+// launch is (Pendragon: /v2/upsell_messages, the message list, and the HTML fullscreen, modal, banner and
+// snackbar formats built from them). Blocked whenever Hide upsells is on, first seconds included: the
+// isRefetch rule below only holds for Spoof Premium and only after the first thirty seconds, so a message
+// fetched at launch came through (device, 2026-09-20).
+static BOOL isUpsellMessage(NSString *path) {
+    return has(path, @"upsell_messages") || has(path, @"upsell-messages")
+        || (has(path, @"pendragon") && (has(path, @"message") || has(path, @"fetchmessagelist")));
+}
+
 static SGNet classify(NSURL *url) {
     NSString *path = url.path.lowercaseString ?: @"";
     if (premium && isLogout(path)) return SGNetBlock;
     if (ads && isAd(url, path)) return SGNetBlock;
+    if (upsells && isUpsellMessage(path)) return SGNetBlock;
     if (premium && elapsed() > 30 && isRefetch(path)) return SGNetBlock;
     if (premium && (isBootstrap(path) || isCustomize(path))) return SGNetPatch;
     if (ads && isFeed(path)) return SGNetPatch;
@@ -275,6 +286,7 @@ static NSURLRequest *unconditional(NSURLRequest *request) {
 %ctor {
     ads = SGHidden(SGKeyHideAds);
     premium = SGHidden(SGKeyFakePremium);
+    upsells = SGHidden(SGKeyHideUpsells);
     if (!ads && !premium) return;
     started = NSDate.date;
     cacheLock = [NSObject new];
