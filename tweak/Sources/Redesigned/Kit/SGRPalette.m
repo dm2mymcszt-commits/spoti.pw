@@ -5,8 +5,10 @@
 
 static const size_t kSample = 64;      // the artwork shrunk to this square before its colours are read
 static const size_t kEdgeRows = 10;    // the bottom rows of it averaged into the edge colour
-static const CGFloat kMaxSaturation = 0.55;
-static const CGFloat kMaxLuminance = 0.07, kMaxLuminanceContrast = 0.04;
+// Fork: quieter than upstream's 0.55 and 0.07. The page reads as a near black tinted by the cover
+// rather than a wash of its colour, which is the restraint the Music app's pages have.
+static const CGFloat kMaxSaturation = 0.32;
+static const CGFloat kMaxLuminance = 0.045, kMaxLuminanceContrast = 0.03;
 static const CGFloat kBackdropWidth = 160, kBackdropMaxHeight = 400, kBackdropSigma = 12;
 static const CGFloat kDissolveWidth = 96, kDissolveSigma = 5;
 static const CGFloat kFadeFrom = 0.55, kDissolveOpaque = 0.85;
