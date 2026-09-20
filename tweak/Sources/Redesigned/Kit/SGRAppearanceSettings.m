@@ -2,6 +2,7 @@
 #import "Settings/SGModPage.h"
 #import "Settings/SGPageStyle.h"
 #import "SGRAccent.h"
+#import "SGRDynamic.h"
 
 // Going back to Spotify's green is offered only once a colour of the mod's is set, so a stray tap
 // cannot wipe it.
@@ -25,5 +26,7 @@ static void chooseAccent(void) {
 NSArray<SGModRow *> *SGRAppearanceRows(void) {
     return @[
         SGWithSymbol(SGStatActionRow(@"Accent colour", nil, ^NSString *{ return SGRAccentLabel(); }, ^{ chooseAccent(); }), @"paintpalette"),
+        // Fork: the cover's colour on the app's surfaces and in place of the green.
+        SGWithSymbol(SGSwitchRow(@"Dynamic colour", @"Home, Search, Library and the settings take a near black tinted by what is playing, and the accent follows its cover", SGRKeyDynamicColor), @"circle.hexagongrid.fill"),
     ];
 }

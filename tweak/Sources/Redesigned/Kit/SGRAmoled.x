@@ -6,6 +6,7 @@
 // Trees: #121212 sits on the Home, Search, Library and settings scroll views, on list rows, the
 // message bar and the player's bottom gradient view.
 #import "Core/SGCore.h"
+#import "SGRDynamic.h"
 
 // Neutral and darker than #1A1A1A, but not already black.
 static BOOL isBaseGrey(CGColorRef color) {
@@ -17,9 +18,26 @@ static BOOL isBaseGrey(CGColorRef color) {
     return c[0] > 0.01 && c[0] <= 0.10 && fabs(c[0] - c[1]) < 0.02 && fabs(c[1] - c[2]) < 0.02;
 }
 
-// Layers get set from background threads too, so no autoreleased UIColor here.
+// Layers get set from background threads too, so no autoreleased UIColor here. Fork: with Dynamic colour
+// on, the base grey takes the near black tinted by what is playing (SGRDynamic.h) rather than pure black,
+// which is what carries the song's colour through Home, Search, Library and the settings lists.
 static CGColorRef copyBlack(CGColorRef color) {
+    CGFloat r, g, b;
+    if (SGRDynamicColor() && SGRDynamicSurface(&r, &g, &b)) {
+        CGFloat components[4] = {r, g, b, CGColorGetAlpha(color)};
+        static CGColorSpaceRef space;
+        static dispatch_once_t once;
+        dispatch_once(&once, ^{ space = CGColorSpaceCreateDeviceRGB(); });
+        return CGColorCreate(space, components);
+    }
     return CGColorCreateGenericGray(0, CGColorGetAlpha(color));
+}
+
+// The same colour for the hooks that set a UIColor on the main thread.
+static UIColor *surfaceColor(void) {
+    CGFloat r, g, b;
+    if (SGRDynamicColor() && SGRDynamicSurface(&r, &g, &b)) return [UIColor colorWithRed:r green:g blue:b alpha:1];
+    return UIColor.blackColor;
 }
 
 %hook CALayer
@@ -57,7 +75,7 @@ static CGColorRef copyBlack(CGColorRef color) {
 - (void)viewDidLayoutSubviews {
     %orig;
     for (UIView *sub in ((UIViewController *)self).view.subviews) {
-        if ([sub isKindOfClass:UICollectionView.class]) sub.backgroundColor = UIColor.blackColor;
+        if ([sub isKindOfClass:UICollectionView.class]) sub.backgroundColor = surfaceColor();
     }
 }
 %end
@@ -65,4 +83,5 @@ static CGColorRef copyBlack(CGColorRef color) {
 %ctor {
     if (!SGRedesignedUI()) return;
     %init;
+    if (SGRDynamicColor()) SGRDynamicStart();
 }
