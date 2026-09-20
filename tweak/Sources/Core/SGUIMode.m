@@ -2,9 +2,12 @@
 #import "SGLog.h"
 #import "SGPrefs.h"
 
+// Fork: the redesign is offered below iOS 26 as well. Upstream holds it at 26 because that is where
+// UIGlassEffect is and because it hung an iOS 17 layout (#37); here the glass falls back to a blur and the
+// hang is answered part by part in the Workaround section (Redesigned/Kit/SGRWorkaround.h), which is the
+// whole point of this fork. Everything else upstream ships still applies.
 BOOL SGRedesignAvailable(void) {
-    if (@available(iOS 26.0, *)) return YES;
-    return NO;
+    return YES;
 }
 
 BOOL SGRedesignedUI(void) {
