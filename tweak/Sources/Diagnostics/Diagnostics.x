@@ -17,41 +17,6 @@ static NSString *hexColor(CGColorRef color) {
     return [NSString stringWithFormat:@"#%02X%02X%02X@%.2f", (int)(r * 255), (int)(g * 255), (int)(b * 255), a];
 }
 
-// Fork: the state of a video layer, read by KVC (the tweak does not link AVFoundation): an AVPlayerLayer's
-// player, its item's status and error and the asset's URL; an AVSampleBufferDisplayLayer's status and error.
-static NSString *mediaState(CALayer *layer) {
-    NSString *name = NSStringFromClass(layer.class);
-    @try {
-        if ([name containsString:@"AVPlayerLayer"]) {
-            id player = [layer valueForKey:@"player"];
-            if (!player) return @" AVPlayerLayer(no player)";
-            id item = [player valueForKey:@"currentItem"];
-            id asset = [item valueForKey:@"asset"];
-            NSString *url = [asset respondsToSelector:NSSelectorFromString(@"URL")] ? [[asset valueForKey:@"URL"] absoluteString] : nil;
-            return [NSString stringWithFormat:@" AVPlayerLayer(ready=%@ rate=%@ playerStatus=%@ playerError=%@ itemStatus=%@ itemError=%@ url=%@)",
-                    [layer valueForKey:@"readyForDisplay"], [player valueForKey:@"rate"], [player valueForKey:@"status"],
-                    [player valueForKey:@"error"], item ? [item valueForKey:@"status"] : @"no item", [item valueForKey:@"error"],
-                    url.length > 80 ? [[url substringToIndex:80] stringByAppendingString:@"…"] : url];
-        }
-        if ([name containsString:@"AVSampleBufferDisplayLayer"]) {
-            return [NSString stringWithFormat:@" %@(status=%@ error=%@)", name, [layer valueForKey:@"status"], [layer valueForKey:@"error"]];
-        }
-    } @catch (NSException *e) {
-        return [NSString stringWithFormat:@" %@(unreadable: %@)", name, e.reason];
-    }
-    return nil;
-}
-
-static void appendMedia(CALayer *layer, NSUInteger depth, NSMutableString *line) {
-    if (depth > 4) return;
-    NSString *state = mediaState(layer);
-    if (state) [line appendString:state];
-    for (CALayer *sub in layer.sublayers) {
-        if (sub.delegate && [sub.delegate isKindOfClass:UIView.class]) continue;
-        appendMedia(sub, depth + 1, line);
-    }
-}
-
 static void appendTree(UIView *view, NSUInteger depth, NSMutableString *out) {
     NSMutableString *line = [NSMutableString stringWithFormat:@"%*s%@ %@", (int)depth * 2, "", NSStringFromClass(view.class), NSStringFromCGRect(view.frame)];
     CGColorRef bg = view.layer.backgroundColor;
@@ -71,7 +36,6 @@ static void appendTree(UIView *view, NSUInteger depth, NSMutableString *out) {
         CGSize size = ((UIImageView *)view).image.size;
         [line appendFormat:@" img=%.0fx%.0f", size.width, size.height];
     }
-    appendMedia(view.layer, 0, line);
     [out appendString:line];
     [out appendString:@"\n"];
     for (UIView *sub in view.subviews) appendTree(sub, depth + 1, out);
@@ -200,30 +164,11 @@ static NSString *recentLog(void) {
     NSDateFormatter *format = [NSDateFormatter new];
     format.dateFormat = @"HH:mm:ss.SSS";
     NSMutableString *out = [NSMutableString string];
-    // Spotify's and the system's own lines about video too (Canvas and the players under the player froze on
-    // their first frame on iOS 17, with every switch off): what the process logged about playing, caching or
-    // being refused a video, the last 1500 of them.
-    static NSRegularExpression *video;
-    if (!video) video = [NSRegularExpression regularExpressionWithPattern:@"video|canvas|betamax|kubrick|avplayer|avasset|avfoundation|coremedia|hls|mp4|cnvs|sandbox|deny|app ?group|AVErrorDomain|CoreMediaErrorDomain|NSURLErrorDomain|-11[0-9]{3}|-12[0-9]{3}|decod|cache.*(error|fail)" options:NSRegularExpressionCaseInsensitive error:nil];
-    // The subsystems that drowned the rest last time: touches, the share sheet the dump itself opens,
-    // and the system's storage accounting.
-    NSSet<NSString *> *noisy = [NSSet setWithArray:@[@"com.apple.UIKit", @"com.apple.ShareSheet", @"com.apple.sharing", @"com.apple.cache_delete"]];
-    NSMutableArray<NSString *> *others = [NSMutableArray array];
     for (id entry in entries) {
         NSString *message = [entry valueForKey:@"composedMessage"];
-        if (!message.length) continue;
-        NSString *when = [format stringFromDate:[entry valueForKey:@"date"]];
-        if ([message containsString:@"[spotifyglass]"]) {
-            [out appendFormat:@"%@ %@\n", when, message];
-            continue;
-        }
-        if (![video firstMatchInString:message options:0 range:NSMakeRange(0, message.length)]) continue;
-        NSString *subsystem = [entry respondsToSelector:NSSelectorFromString(@"subsystem")] ? [entry valueForKey:@"subsystem"] : nil;
-        if (subsystem && [noisy containsObject:subsystem]) continue;
-        [others addObject:[NSString stringWithFormat:@"%@ [%@] %@", when, subsystem.length ? subsystem : @"-", message]];
-        if (others.count > 1500) [others removeObjectAtIndex:0];
+        if (![message containsString:@"[spotifyglass]"]) continue;
+        [out appendFormat:@"%@ %@\n", [format stringFromDate:[entry valueForKey:@"date"]], message];
     }
-    [out appendFormat:@"\n== video and cache lines of the process (last 10 min, %lu)\n%@\n", (unsigned long)others.count, [others componentsJoinedByString:@"\n"]];
     return out;
 }
 
