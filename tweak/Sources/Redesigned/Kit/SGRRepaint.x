@@ -27,6 +27,17 @@ __weak UIView *sgr_artistRoot = nil;
             } else if (SGIsBaseSurface(color) && (SGIsInside(view, sgr_playlistRoot) || SGIsInside(view, sgr_albumRoot) || SGIsInside(view, sgr_artistRoot))) {
                 color = NULL;
             }
+        } else if (SGIsBaseSurface(color) && ![view isKindOfClass:UIView.class]) {
+            // Fork: a layer of its own rather than a view's. Spotify paints parts of the sections under an
+            // album's tracks and of an artist's page on plain sublayers, which the checks above never see,
+            // and they came out as black bands across the page's field (device, 2026-09-20). The view the
+            // layer belongs to is the first one up its chain.
+            CALayer *layer = self.superlayer;
+            while (layer && ![layer.delegate isKindOfClass:UIView.class]) layer = layer.superlayer;
+            UIView *host = (UIView *)layer.delegate;
+            if (host && (SGIsInside(host, sgr_playlistRoot) || SGIsInside(host, sgr_albumRoot) || SGIsInside(host, sgr_artistRoot))) {
+                color = NULL;
+            }
         }
     }
     %orig(color);

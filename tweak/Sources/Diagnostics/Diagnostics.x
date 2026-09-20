@@ -32,6 +32,13 @@ static void appendTree(UIView *view, NSUInteger depth, NSMutableString *out) {
         UILabel *label = (UILabel *)view;
         [line appendFormat:@" \"%@\" %.0fpt %@", label.text, label.font.pointSize, hexColor(label.textColor.CGColor)];
     }
+    // Fork: what the view's own sublayers paint, which a view's line never showed and which is where
+    // black bands over a page's field came from (device, 2026-09-20).
+    for (CALayer *sub in view.layer.sublayers) {
+        if (sub.delegate) continue;
+        CGColorRef subBg = sub.backgroundColor;
+        if (subBg && CGColorGetAlpha(subBg) > 0) [line appendFormat:@" sub=%@%@", hexColor(subBg), sub.hidden ? @"(hidden)" : @""];
+    }
     if ([view isKindOfClass:UIImageView.class] && ((UIImageView *)view).image) {
         CGSize size = ((UIImageView *)view).image.size;
         [line appendFormat:@" img=%.0fx%.0f", size.width, size.height];
