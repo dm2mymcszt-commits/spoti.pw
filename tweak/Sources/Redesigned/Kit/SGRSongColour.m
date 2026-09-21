@@ -27,7 +27,7 @@ static const CFTimeInterval kTurn[2] = {45, 60};
 static const CGFloat kBlobSide = 1.3, kBlobOpacity[2] = {0.42, 0.32};
 static const CGPoint kBlobCentre[2] = {{0.3, 0.35}, {0.7, 0.7}};
 // Accents remembered besides the playing one; the Appearance accent is always the first of them.
-static const NSUInteger kWornMax = 12;
+enum { kWornMax = 12 };
 
 static os_unfair_lock sg_lock = OS_UNFAIR_LOCK_INIT;
 static BOOL sg_hasColour;
