@@ -73,32 +73,44 @@ void SGRPickAccent(void) {
 
 // A darker green than the token comes out as the accent darkened by the same amount, so the two
 // keep their relation.
-static BOOL swap(CGFloat *r, CGFloat *g, CGFloat *b) {
+// `song` takes the playing cover's accent when there is one (SGRSongColour.h), for a colour fixed where
+// it is made (a layer's CGColor); the stored accent otherwise. `factor` is how bright the green was.
+static BOOL swapTo(CGFloat *r, CGFloat *g, CGFloat *b, BOOL song, CGFloat *factorOut) {
     for (size_t i = 0; i < sizeof(kGreens) / sizeof(kGreens[0]); i++) {
         CGFloat gr, gg, gb;
         unpack(kGreens[i], &gr, &gg, &gb);
         if (fabs(*r - gr) > 0.01 || fabs(*g - gg) > 0.01 || fabs(*b - gb) > 0.01) continue;
         CGFloat ar, ag, ab;
-        // Fork: with Song colour on, the accent is the playing cover's (SGRSongColour.h) until a grey cover
-        // leaves the stored one standing. Read here rather than at launch, so what is drawn next is the song's.
-        if (!SGRSongColour() || !SGRSongAccent(&ar, &ag, &ab)) unpack((uint32_t)sg_accent, &ar, &ag, &ab);
+        if (!song || !SGRSongColour() || !SGRSongAccent(&ar, &ag, &ab)) unpack((uint32_t)sg_accent, &ar, &ag, &ab);
         CGFloat factor = MAX(gr, MAX(gg, gb)) / (0xD7 / 255.0);
         *r = MIN(1, ar * factor);
         *g = MIN(1, ag * factor);
         *b = MIN(1, ab * factor);
+        if (factorOut) *factorOut = factor;
         return YES;
     }
     return NO;
 }
 
+static BOOL swap(CGFloat *r, CGFloat *g, CGFloat *b) {
+    return swapTo(r, g, b, YES, NULL);
+}
+
+// Fork: with Song colour on, Spotify's green becomes a live colour (SGRSongColour.h) that resolves to the
+// playing cover's accent whenever it is drawn, the stored accent until the first song is read. Spotify makes
+// its green once and keeps it, so a colour fixed here stayed the first song's.
 %hook UIColor
 - (UIColor *)initWithRed:(CGFloat)r green:(CGFloat)g blue:(CGFloat)b alpha:(CGFloat)a {
-    swap(&r, &g, &b);
-    return %orig(r, g, b, a);
+    CGFloat factor = 1;
+    if (!swapTo(&r, &g, &b, NO, &factor)) return %orig(r, g, b, a);
+    UIColor *fixed = %orig(r, g, b, a);
+    return SGRSongLiveAccent(factor, a, fixed) ?: fixed;
 }
 + (UIColor *)colorWithRed:(CGFloat)r green:(CGFloat)g blue:(CGFloat)b alpha:(CGFloat)a {
-    swap(&r, &g, &b);
-    return %orig(r, g, b, a);
+    CGFloat factor = 1;
+    if (!swapTo(&r, &g, &b, NO, &factor)) return %orig(r, g, b, a);
+    UIColor *fixed = %orig(r, g, b, a);
+    return SGRSongLiveAccent(factor, a, fixed) ?: fixed;
 }
 %end
 

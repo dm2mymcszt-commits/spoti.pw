@@ -9,10 +9,14 @@
 //                (SGRAccent.x swaps it where a colour is made)
 //   the text     the same hue, lighter, for the labels Spotify draws white (Tint text, its own switch)
 //
-// What is already on screen is recoloured at once on a change: the glows crossfade, and a walk over the
-// windows takes every label, layer and shape still in the last song's colours to the new ones. What is
-// drawn after takes the new colours where it is made. A grey or black and white cover leaves the accent
-// and the text as they were, and gives a grey glow.
+// The accent and the text are live colours (SGRSongLiveAccent, SGRSongLiveText): they resolve to the playing
+// song's whenever UIKit draws them. Spotify makes its colours once and keeps them (its green is one cached
+// object), and a cell can be off screen while the song changes, so a colour fixed where it was made kept
+// the first song's, or the last one it saw (device dump, 2026-09-21: labels of two songs side by side). A
+// change sets a trait of the mod's own on every window (iOS 17's custom traits, affecting colour
+// appearance), which makes UIKit redraw every live colour on screen and in any view that comes back to
+// one. Colours a layer was handed as a CGColor are taken over by a walk over the windows. The glows
+// crossfade. A grey or black and white cover leaves the accent and the text as they were.
 //
 // Threading: the colours are read from any thread (layers are painted off the main one), under a lock;
 // everything else is main thread only.
@@ -30,6 +34,12 @@ BOOL SGRSongColourText(void);   // Tint text, read at launch; NO while Song colo
 // The current colours, NO until a cover has been read (or while it is grey). Any thread.
 BOOL SGRSongAccent(CGFloat *r, CGFloat *g, CGFloat *b);
 BOOL SGRSongText(CGFloat *r, CGFloat *g, CGFloat *b);
+
+// Live colours: Spotify's green at `factor` of its brightness (its darker states), and the text tint. They
+// resolve to `fallback` (or white for the text) until a song's colours are in. nil with the switch off or
+// below iOS 17, where the caller keeps its fixed colour.
+UIColor *SGRSongLiveAccent(CGFloat factor, CGFloat alpha, UIColor *fallback);
+UIColor *SGRSongLiveText(CGFloat alpha);
 
 // Starts following the now playing artwork; once, from the %ctor of SGRSongColourHosts.x.
 void SGRSongColourStart(void);

@@ -103,6 +103,70 @@ static BOOL components(CGColorRef color, CGFloat rgba[4]) {
     return YES;
 }
 
+#pragma mark - live colours
+
+// A trait of the mod's own whose value is bumped on every song: a live colour reads it, so UIKit knows that
+// colour depends on it and redraws it when it changes.
+API_AVAILABLE(ios(17.0))
+@interface SGRSongTrait : NSObject <UINSIntegerTraitDefinition>
+@end
+
+@implementation SGRSongTrait
++ (NSInteger)defaultValue {
+    return 0;
+}
++ (NSString *)identifier {
+    return @"com.spotifyglass.songColour";
+}
++ (NSString *)name {
+    return @"SongColour";
+}
++ (BOOL)affectsColorAppearance {
+    return YES;
+}
+@end
+
+static NSInteger sg_traitValue;   // main thread
+
+// Made through CoreGraphics rather than +colorWithRed:..., which SGRAccent.x swaps: a song whose accent is
+// Spotify's green to the digit must not come back through the swap.
+static UIColor *plainColour(CGFloat r, CGFloat g, CGFloat b, CGFloat a) {
+    static CGColorSpaceRef space;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ space = CGColorSpaceCreateDeviceRGB(); });
+    CGFloat c[4] = {MIN(1, r), MIN(1, g), MIN(1, b), a};
+    CGColorRef cg = CGColorCreate(space, c);
+    UIColor *color = [UIColor colorWithCGColor:cg];
+    CGColorRelease(cg);
+    return color;
+}
+
+UIColor *SGRSongLiveAccent(CGFloat factor, CGFloat alpha, UIColor *fallback) {
+    if (!SGRSongColour()) return nil;
+    if (@available(iOS 17.0, *)) {
+        return [UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *traits) {
+            [traits valueForNSIntegerTrait:SGRSongTrait.class];
+            CGFloat r, g, b;
+            if (!SGRSongAccent(&r, &g, &b)) return fallback;
+            return plainColour(r * factor, g * factor, b * factor, alpha);
+        }];
+    }
+    return nil;
+}
+
+UIColor *SGRSongLiveText(CGFloat alpha) {
+    if (!SGRSongColourText()) return nil;
+    if (@available(iOS 17.0, *)) {
+        return [UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *traits) {
+            [traits valueForNSIntegerTrait:SGRSongTrait.class];
+            CGFloat r, g, b;
+            if (!SGRSongText(&r, &g, &b)) return plainColour(1, 1, 1, alpha);
+            return plainColour(r, g, b, alpha);
+        }];
+    }
+    return nil;
+}
+
 #pragma mark - reading a cover
 
 static dispatch_queue_t readQueue(void) {
@@ -222,10 +286,6 @@ static BOOL sameFamily(CGFloat c[4], CGFloat ref[3]) {
     return dh < 0.045 && fabs(s - rs) < 0.35;
 }
 
-static BOOL sameColour(CGFloat c[4], CGFloat ref[3]) {
-    return fabs(c[0] - ref[0]) < 0.02 && fabs(c[1] - ref[1]) < 0.02 && fabs(c[2] - ref[2]) < 0.02;
-}
-
 static BOOL white(CGFloat c[4]) {
     return c[0] > 0.93 && c[1] > 0.93 && c[2] > 0.93 && c[3] > 0.9;
 }
@@ -269,8 +329,9 @@ static void recolourView(UIView *view, const SGRRecolour *m) {
     if ([view isKindOfClass:UILabel.class]) {
         UILabel *label = (UILabel *)view;
         if (components(label.textColor.CGColor, c)) {
-            if (m->text && (white(c) || (m->hadText && sameColour(c, (CGFloat *)m->oldText)))) {
-                label.textColor = [UIColor colorWithRed:m->newText[0] green:m->newText[1] blue:m->newText[2] alpha:c[3]];
+            UIColor *live = m->text && white(c) ? SGRSongLiveText(c[3]) : nil;
+            if (live) {
+                label.textColor = live;
             } else if (sameFamily(c, (CGFloat *)m->oldAccent)) {
                 label.textColor = mapped(c, (CGFloat *)m->oldAccent, (CGFloat *)m->newAccent);
             }
@@ -286,13 +347,16 @@ static void recolourView(UIView *view, const SGRRecolour *m) {
 }
 
 static void recolourWindows(const SGRRecolour *m) {
-    UIColor *tint = [UIColor colorWithRed:m->newAccent[0] green:m->newAccent[1] blue:m->newAccent[2] alpha:1];
+    UIColor *tint = plainColour(m->newAccent[0], m->newAccent[1], m->newAccent[2], 1);
+    if (@available(iOS 17.0, *)) sg_traitValue++;
     for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
         if (![scene isKindOfClass:UIWindowScene.class]) continue;
         for (UIWindow *window in ((UIWindowScene *)scene).windows) {
-            if (window.hidden || [NSStringFromClass(window.class) containsString:@"FLEX"]) continue;
+            if ([NSStringFromClass(window.class) containsString:@"FLEX"]) continue;
+            // Every live colour in the window, and in whatever joins it later, resolves again.
+            if (@available(iOS 17.0, *)) [window.traitOverrides setNSIntegerValue:sg_traitValue forTrait:SGRSongTrait.class];
             window.tintColor = tint;
-            recolourView(window, m);
+            if (!window.hidden) recolourView(window, m);
         }
     }
 }
@@ -395,6 +459,14 @@ static NSDictionary *noActions(void) {
         [_glow addAnimation:fade forKey:@"contents"];
     }
     _glow.contents = contents;
+}
+
+// A glow that was off screen while the song changed catches up as it comes back.
+- (void)didMoveToWindow {
+    [super didMoveToWindow];
+    if (!self.window) return;
+    id contents = (__bridge id)sg_glow.CGImage;
+    if (_glow.contents != contents) _glow.contents = contents;
 }
 
 - (void)layoutSubviews {

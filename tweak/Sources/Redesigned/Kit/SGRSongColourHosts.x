@@ -50,6 +50,21 @@
 }
 %end
 
+#pragma mark - views joining a screen
+
+// Spotify paints a cell its base surface before the cell is in the list, so the repaint hook, which asks
+// where a view is, let it through, and Home came out black under its header (device, 2026-09-21). A view
+// arriving in a window inside a glowing screen is cleared as it arrives.
+%hook UIView
+- (void)didMoveToWindow {
+    %orig;
+    UIView *view = (UIView *)self;
+    CGColorRef bg = view.layer.backgroundColor;
+    if (!view.window || !bg || !SGIsBaseSurface(bg) || SGKeepsColor(view) || [view isKindOfClass:SGRSongGlowView.class]) return;
+    if (SGRSongColourClears(view)) view.layer.backgroundColor = NULL;
+}
+%end
+
 #pragma mark - the heroes
 
 // A hero fades into its page's colour by drawing that colour over its bottom. Over the glow the page has no
@@ -104,13 +119,12 @@ static void maskHero(UIView *hero) {
 
 #pragma mark - the text
 
+// White takes the live text colour, which follows the song on its own from then on (SGRSongColour.h).
 static UIColor *tinted(UIColor *color) {
     CGFloat r, g, b, a;
     if (![color isKindOfClass:UIColor.class] || ![color getRed:&r green:&g blue:&b alpha:&a]) return color;
     if (r < 0.93 || g < 0.93 || b < 0.93 || a < 0.9) return color;
-    CGFloat tr, tg, tb;
-    if (!SGRSongText(&tr, &tg, &tb)) return color;
-    return [UIColor colorWithRed:tr green:tg blue:tb alpha:a];
+    return SGRSongLiveText(a) ?: color;
 }
 
 %group Text
