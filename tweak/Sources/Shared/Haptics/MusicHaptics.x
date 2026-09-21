@@ -68,8 +68,8 @@ static atomic_uint sg_lastFrames;
 // thread never reads half of a change (flags in the low 32 bits, then channels, then bytes per sample).
 static atomic_uint_fast64_t sg_sampleRateBits, sg_layout;
 static atomic_uint_fast64_t sg_skipped;   // renders whose buffers were not laid out as the format says
-// The strength's factor and what is followed, set on the main thread, read on the player thread.
-static atomic_uint_fast64_t sg_strengthBits;
+// The strength's factor, what is followed and the timing, set on the main thread, read on the player thread.
+static atomic_uint_fast64_t sg_strengthBits, sg_offsetBits;
 static atomic_int sg_follows;
 
 static SGMusicEvent sg_ring[kRingSize];
@@ -320,12 +320,14 @@ static void stopEngine(void) {
     sg_engineRunning = NO;
 }
 
-// When `hostTime`'s sound is heard, in the engine's clock; `lead` is how far ahead of now that is.
+// When `hostTime`'s sound is heard, moved by the timing setting, in the engine's clock; `lead` is how far ahead
+// of now the sound itself is, which says whether a tap is too late. A tap asked for earlier than it can be
+// played is played at once.
 static NSTimeInterval engineTime(uint64_t hostTime, double *lead) {
     double now = hostSeconds(mach_absolute_time());
     double heard = hostSeconds(hostTime) + loadDouble(&sg_latencyBits) - kHapticLead;
     *lead = heard - now;
-    return sg_engine.currentTime + MAX(0, *lead);
+    return sg_engine.currentTime + MAX(0, *lead + loadDouble(&sg_offsetBits));
 }
 
 static CHHapticEventParameter *parameter(CHHapticEventParameterID identifier, float value) {
@@ -522,6 +524,7 @@ void SGSetMusicHapticsEnabled(BOOL on) {
 
 static void readSettings(void) {
     storeDouble(&sg_strengthBits, SGHapticsStrength(SGKeyMusicStrength));
+    storeDouble(&sg_offsetBits, SGMusicHapticsOffset());
     atomic_store(&sg_follows, (int)SGMusicHapticsFollows());
 }
 

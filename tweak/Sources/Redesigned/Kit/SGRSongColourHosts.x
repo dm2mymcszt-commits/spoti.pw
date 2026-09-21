@@ -69,6 +69,32 @@
 }
 %end
 
+// The lists themselves: Home's (Home_CarouselKit.TouchCancellingCollectionView) and the Library's
+// (YourLibrary_CommonKit.YourLibraryCollectionView) came out opaque black over the glow, Home's from launch and
+// the Library's once it had rebuilt its list (device dumps, 2026-09-21). A list is painted before it has a size,
+// when the paint rules keep what a view of 4pt or less wears, and joins before its screen is adopted, so
+// neither the repaint nor the arrival took it off. It is taken off as the list lays out, which it does as it
+// scrolls: a look at its colour, and only one of the base surface asks where it is.
+%hook UIScrollView
+- (void)layoutSubviews {
+    %orig;
+    UIScrollView *list = (UIScrollView *)self;
+    CGColorRef bg = list.layer.backgroundColor;
+    if (bg && SGIsBaseSurface(bg) && SGRSongColourClears(list)) list.layer.backgroundColor = NULL;
+}
+%end
+
+#pragma mark - glyphs
+
+// Shuffle, repeat and the checkmarks are drawn into images in the accent of the moment and set again as their
+// state changes (SGRSongColourGlyph): each is painted in the playing song's colour on its way in.
+%hook UIImageView
+- (void)setImage:(UIImage *)image {
+    UIImage *glyph = SGRSongColourGlyph(image);
+    %orig(glyph ?: image);
+}
+%end
+
 #pragma mark - the heroes
 
 // A hero fades into its page's colour by drawing that colour over its bottom. Over the glow the page has no
@@ -134,11 +160,12 @@ static UIColor *tinted(UIColor *color) {
 %group Text
 %hook UILabel
 - (void)setTextColor:(UIColor *)color {
-    %orig(tinted(color));
+    UILabel *label = (UILabel *)self;
+    %orig(SGRSongColourKeepsWhite(label) ? color : tinted(color));
 }
 
 - (void)setAttributedText:(NSAttributedString *)text {
-    if (!text.length) {
+    if (!text.length || SGRSongColourKeepsWhite((UILabel *)self)) {
         %orig;
         return;
     }

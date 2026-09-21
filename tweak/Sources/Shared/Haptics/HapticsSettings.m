@@ -31,6 +31,10 @@ double SGHapticsStrength(NSString *key) {
     return MAX(minimum, MIN(maximum, SGInt(key, 100))) / 100.0;
 }
 
+double SGMusicHapticsOffset(void) {
+    return MAX(SGMusicOffsetMin, MIN(SGMusicOffsetMax, SGInt(SGKeyMusicOffset, 0))) / 1000.0;
+}
+
 SGMusicFollows SGMusicHapticsFollows(void) {
     NSInteger follows = SGInt(SGKeyMusicFollows, SGMusicFollowsEverything);
     return follows >= SGMusicFollowsEverything && follows <= SGMusicFollowsBass ? (SGMusicFollows)follows : SGMusicFollowsEverything;
@@ -67,9 +71,22 @@ NSArray<SGModSection *> *SGVibrationsSections(void) {
     follows.choiceNotes = followsNotes();
     follows.chosen = ^(NSInteger index) { SGMusicHapticsSettingsChanged(); };
     follows.visible = musicOn;
+    // Fork: the taps later or earlier than the sound, felt as it is set on the next beat.
+    SGModRow *timing = SGSliderRow(@"Timing", @"Later if the taps come before the beat, earlier if they come after it",
+        SGMusicOffsetMin, SGMusicOffsetMax, SGMusicOffsetStep,
+        ^double { return SGMusicHapticsOffset() * 1000; },
+        ^(double value) {
+            SGSetInt(SGKeyMusicOffset, lround(value));
+            SGMusicHapticsSettingsChanged();
+        },
+        ^NSString *(double value) {
+            long ms = lround(value);
+            return ms == 0 ? @"On the beat" : [NSString stringWithFormat:@"%ld ms %@", labs(ms), ms > 0 ? @"later" : @"earlier"];
+        });
+    timing.visible = musicOn;
 
     return @[
         SGSection(@"Vibrations", @[SGWithSymbol(controls, @"hand.tap"), controlStrength]),
-        SGSection(nil, @[SGWithSymbol(music, @"waveform"), musicStrength, follows]),
+        SGSection(nil, @[SGWithSymbol(music, @"waveform"), musicStrength, follows, timing]),
     ];
 }

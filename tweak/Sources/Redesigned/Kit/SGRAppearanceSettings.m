@@ -22,6 +22,19 @@ static void chooseAccent(void) {
     [top presentViewController:sheet animated:YES completion:nil];
 }
 
+// Fork: how fast Moving glow turns, applied as it is dragged (the settings pages glow too, so it is seen).
+static SGModRow *glowSpeedRow(void) {
+    SGModRow *row = SGSliderRow(@"Glow speed", nil, SGRMotionSpeedMin, SGRMotionSpeedMax, 1,
+        ^double { return SGRSongColourMotionSpeed(); },
+        ^(double value) {
+            SGSetInt(SGRKeySongColourMotionSpeed, lround(value));
+            SGRSongColourMotionSpeedChanged();
+        },
+        ^NSString *(double value) { return lround(value) == 1 ? @"1 turn a minute" : [NSString stringWithFormat:@"%ld turns a minute", lround(value)]; });
+    row.visible = ^BOOL { return SGFlag(SGRKeySongColourMotion, NO); };
+    return row;
+}
+
 // The redesign's rows of the Appearance card (App/Pages.m). AMOLED has no row: the redesign is always black.
 NSArray<SGModRow *> *SGRAppearanceRows(void) {
     return @[
@@ -30,5 +43,6 @@ NSArray<SGModRow *> *SGRAppearanceRows(void) {
         SGWithSymbol(SGSwitchRow(@"Song colour", @"Every screen glows with the playing cover, and its most vibrant colour replaces the accent", SGRKeySongColour), @"circle.hexagongrid.fill"),
         SGWithSymbol(SGSwitchRow(@"Tint text", @"White text takes a light shade of the song's colour, with Song colour on", SGRKeySongColourText), @"textformat"),
         SGWithSymbol(SGOptionRow(@"Moving glow", @"The glow turns slowly behind the screens, with Song colour on. Uses more battery", SGRKeySongColourMotion), @"rotate.right"),
+        glowSpeedRow(),
     ];
 }

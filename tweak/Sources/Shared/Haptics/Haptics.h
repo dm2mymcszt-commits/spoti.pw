@@ -21,6 +21,9 @@
 #define SGKeyMusicStrength @"spotifyglass.haptics.music.strength"
 // What Music Haptics plays along with, an SGMusicFollows.
 #define SGKeyMusicFollows @"spotifyglass.haptics.music.follows"
+// Fork: Music Haptics' timing against the sound, in milliseconds: later when positive, earlier when negative,
+// for a route whose latency iOS reports wrong or an ear that wants the tap ahead of the drum.
+#define SGKeyMusicOffset @"spotifyglass.haptics.music.offset"
 // What the keys were called while this was the redesign's alone; the %ctors move them over.
 #define SGKeyControlHapticsWas @"spotifyglass.redesign.haptics.controls"
 #define SGKeyMusicHapticsWas @"spotifyglass.redesign.haptics.music"
@@ -34,6 +37,7 @@ enum {
     SGControlStrengthMin = 10, SGControlStrengthMax = 100,
     SGMusicStrengthMin = 20, SGMusicStrengthMax = 200,
     SGStrengthStep = 10,
+    SGMusicOffsetMin = -200, SGMusicOffsetMax = 200, SGMusicOffsetStep = 10,
 };
 
 typedef NS_ENUM(NSInteger, SGMusicFollows) {
@@ -67,6 +71,8 @@ void SGMusicHapticsSettingsChanged(void);
 // A strength key's percentage as a factor, 1 for 100%, kept within its range.
 double SGHapticsStrength(NSString *key);
 SGMusicFollows SGMusicHapticsFollows(void);
+// The timing in seconds, within its range.
+double SGMusicHapticsOffset(void);
 
 @class SGModSection;
 // The Vibrations sections of the Player page: a card for Controls and one for Music Haptics, each opening

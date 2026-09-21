@@ -5,6 +5,7 @@
 #import "SGRBridges.h"
 #import "SGRTokens.h"
 #import "SGRAccent.h"
+#import "SGRVibrant.h"
 
 NSNotificationName const SGRSongColourDidChangeNotification = @"spotifyglass.redesign.songColourDidChange";
 
@@ -15,16 +16,13 @@ static const CGFloat kGlowOpacity = 0.5;
 // how much livelier the glow is made than the cover.
 static const size_t kSide = 64;
 static const CGFloat kBlur = 7, kGlowSaturation = 1.8, kGlowContrast = 1.1;
-// HSL: the accent has to carry on the glow; the text is lighter so a paragraph of it still reads.
-static const CGFloat kAccentLightness = 0.55, kTextLightness = 0.74, kMinSaturation = 0.5, kMaxSaturation = 0.9;
-// Below this share of vibrant pixels the cover is grey, black and white or nearly so.
-static const CGFloat kVibrantShare = 0.03;
-// Moving glow: the reference turns its copies once in 45 s. Each copy is this much of the view's longer
-// side across, sits at its centre below (a share of the view's size), and shows this strongly; the two
-// together come out about as bright as the still glow. The second turns the other way, more slowly, so
-// the two never line up.
-static const CFTimeInterval kTurn[2] = {45, 60};
-static const CGFloat kBlobSide = 1.3, kBlobOpacity[2] = {0.42, 0.32};
+// HSL: the accent has to carry on the glow; the text is lighter so a paragraph of it still reads. The hue and
+// the saturation are the cover's, as DefaultDynamic picks them (SGRVibrant.h).
+static const CGFloat kAccentLightness = 0.55, kTextLightness = 0.74;
+// Moving glow: each copy is this much of the view's longer side across, sits at its centre below (a share
+// of the view's size), and shows this strongly; the two together come out about as bright as the still
+// glow. The second turns the other way and this much more slowly, so the two never line up.
+static const CGFloat kBlobSide = 1.3, kBlobOpacity[2] = {0.42, 0.32}, kSecondTurn = 4.0 / 3;
 static const CGPoint kBlobCentre[2] = {{0.3, 0.35}, {0.7, 0.7}};
 // Accents remembered besides the playing one; the Appearance accent is always the first of them.
 enum { kWornMax = 12 };
@@ -38,7 +36,7 @@ static NSUInteger sg_songs;        // main thread: how many songs have given col
 static CGFloat sg_worn[kWornMax][3];
 static NSUInteger sg_wornCount;    // main thread
 static NSHashTable<UIView *> *sg_roots;
-static char kGlowKey, kLiveKey, kIconSongKey;
+static char kGlowKey, kLiveKey, kIconSongKey, kGlyphInfoKey, kGlyphOriginalKey, kGlyphSongKey, kGlyphPaintKey, kKeepWhiteKey;
 
 BOOL SGRSongColour(void) {
     static BOOL on;
@@ -203,40 +201,6 @@ static dispatch_queue_t readQueue(void) {
     return queue;
 }
 
-// Vibrant's idea on 64x64 pixels: hue bins weighted by how saturated a pixel is and how close to a mid
-// lightness, the best bin with its two neighbours, averaged.
-static BOOL vibrantIn(const uint8_t *pixels, CGFloat out[3]) {
-    CGFloat weights[36] = {0}, sums[36][3] = {{0}}, counted = 0;
-    for (size_t i = 0; i < kSide * kSide; i++) {
-        const uint8_t *p = pixels + i * 4;
-        CGFloat a = p[3] / 255.0;
-        if (a < 0.5) continue;
-        CGFloat r = p[0] / 255.0 / a, g = p[1] / 255.0 / a, b = p[2] / 255.0 / a, h, s, l;
-        toHSL(MIN(1, r), MIN(1, g), MIN(1, b), &h, &s, &l);
-        counted += 1;
-        if (l < 0.12 || l > 0.92 || s < 0.25) continue;
-        CGFloat w = s * (1 - fabs(l - 0.5) * 1.4);
-        if (w <= 0) continue;
-        int bin = MIN(35, (int)(h * 36));
-        weights[bin] += w;
-        sums[bin][0] += r * w, sums[bin][1] += g * w, sums[bin][2] += b * w;
-    }
-    int best = -1;
-    CGFloat bestScore = 0;
-    for (int i = 0; i < 36; i++) {
-        CGFloat score = weights[(i + 35) % 36] + weights[i] + weights[(i + 1) % 36];
-        if (score > bestScore) bestScore = score, best = i;
-    }
-    if (best < 0 || counted < 1 || bestScore / counted < kVibrantShare) return NO;
-    CGFloat r = 0, g = 0, b = 0;
-    for (int k = -1; k <= 1; k++) {
-        int i = (best + k + 36) % 36;
-        r += sums[i][0], g += sums[i][1], b += sums[i][2];
-    }
-    out[0] = r / bestScore, out[1] = g / bestScore, out[2] = b / bestScore;
-    return YES;
-}
-
 static CGImageRef copyGlow(CGImageRef small) {
     static CIContext *context;
     static dispatch_once_t once;
@@ -287,11 +251,11 @@ static CGImageRef copyBlob(CGImageRef glow) {
 
 // One cover's colours, as a struct so a block can carry them to the main thread.
 typedef struct {
-    BOOL vibrant;
     CGFloat accent[3], text[3];
 } SGRReading;
 
 static void publish(SGRReading reading, CGImageRef glow, CGImageRef blob);
+static void appearanceAccent(CGFloat out[3]);
 
 static void readCover(UIImage *image) {
     CGImageRef cover = image.CGImage;
@@ -304,19 +268,21 @@ static void readCover(UIImage *image) {
         CGContextRef context = CGBitmapContextCreate(pixels, kSide, kSide, 8, kSide * 4, space, (CGBitmapInfo)kCGImageAlphaPremultipliedLast);
         CGContextSetInterpolationQuality(context, kCGInterpolationMedium);
         CGContextDrawImage(context, CGRectMake(0, 0, kSide, kSide), cover);
-        CGImageRelease(cover);
         CGImageRef small = CGBitmapContextCreateImage(context);
 
-        CGFloat found[3] = {0};
-        SGRReading reading = {0};
-        reading.vibrant = vibrantIn(pixels, found);
-        if (reading.vibrant) {
-            CGFloat h, s, l;
-            toHSL(found[0], found[1], found[2], &h, &s, &l);
-            CGFloat saturation = MIN(kMaxSaturation, MAX(s, kMinSaturation));
-            fromHSL(h, saturation, kAccentLightness, reading.accent);
-            fromHSL(h, saturation, kTextLightness, reading.text);
+        // Every cover gives a colour, as in the reference theme: a grey one a grey, and one where nothing
+        // fits the Appearance accent, as the theme falls back to Spotify's green. A song never wears the last
+        // one's (device, 2026-09-21: Dis-le in Backrooms' yellow, a dark cover in the song before's blue).
+        CGFloat hue, saturation, l;
+        if (!SGRVibrantPick(cover, &hue, &saturation)) {
+            CGFloat appearance[3];
+            appearanceAccent(appearance);
+            toHSL(appearance[0], appearance[1], appearance[2], &hue, &saturation, &l);
         }
+        CGImageRelease(cover);
+        SGRReading reading = {0};
+        fromHSL(hue, saturation, kAccentLightness, reading.accent);
+        fromHSL(hue, saturation, kTextLightness, reading.text);
         CGImageRef glow = small ? copyGlow(small) : NULL;
         CGImageRef blob = glow && SGRSongColourMotion() ? copyBlob(glow) : NULL;
 
@@ -550,6 +516,129 @@ static void recolourIcon(UIView *view) {
     }
 }
 
+#pragma mark - glyphs painted in the accent
+
+// Spotify draws some glyphs into images already in their colour: shuffle and repeat in the player and on the
+// pages (LegacyUI_ECMCoreKit's EncoreButton, a UIImageView of 24x24), once per state, and hands out that image
+// again whatever song plays (device, 2026-09-21: repeat always an old song's red, repeat-one always another's
+// gold). An image of the kind is painted again in the playing song's colour as it is set, and again on every
+// song. Only a small image whose opaque pixels are all one colour, of an accent this song or an earlier one
+// wore: artwork, white and grey glyphs, and anything drawn in two colours stay as they are.
+@interface SGRWeak : NSObject
+@property (nonatomic, weak) id object;
+@end
+
+@implementation SGRWeak
+@end
+
+// The one colour of `image`'s opaque pixels, into `out`; NO when it is not a glyph of one colour. Worked out
+// once per image.
+static BOOL glyphColour(UIImage *image, CGFloat out[4]) {
+    NSArray<NSNumber *> *known = objc_getAssociatedObject(image, &kGlyphInfoKey);
+    if (!known) {
+        known = @[];
+        CGSize size = image.size;
+        CGImageRef cg = image.CGImage;
+        BOOL candidate = cg && !image.isSymbolImage && image.renderingMode != UIImageRenderingModeAlwaysTemplate && !image.images
+            && size.width >= 8 && size.height >= 8 && size.width <= 44 && size.height <= 44
+            && UIEdgeInsetsEqualToEdgeInsets(image.capInsets, UIEdgeInsetsZero);
+        if (candidate) {
+            enum { kProbe = 16 };
+            uint8_t pixels[kProbe * kProbe * 4] = {0};
+            CGColorSpaceRef space = CGColorSpaceCreateDeviceRGB();
+            CGContextRef context = CGBitmapContextCreate(pixels, kProbe, kProbe, 8, kProbe * 4, space, (CGBitmapInfo)kCGImageAlphaPremultipliedLast);
+            CGColorSpaceRelease(space);
+            CGContextDrawImage(context, CGRectMake(0, 0, kProbe, kProbe), cg);
+            CGContextRelease(context);
+            CGFloat sum[3] = {0};
+            int opaque = 0;
+            for (int i = 0; i < kProbe * kProbe; i++) {
+                const uint8_t *p = pixels + i * 4;
+                if (p[3] < 128) continue;
+                for (int c = 0; c < 3; c++) sum[c] += p[c] / (CGFloat)p[3];
+                opaque++;
+            }
+            if (opaque >= 8) {
+                CGFloat mean[3] = {sum[0] / opaque, sum[1] / opaque, sum[2] / opaque};
+                int alike = 0;
+                for (int i = 0; i < kProbe * kProbe; i++) {
+                    const uint8_t *p = pixels + i * 4;
+                    if (p[3] < 128) continue;
+                    CGFloat far = 0;
+                    for (int c = 0; c < 3; c++) far = MAX(far, fabs(p[c] / (CGFloat)p[3] - mean[c]));
+                    if (far < 0.1) alike++;
+                }
+                if (alike >= opaque * 0.85) known = @[@(MIN(1, mean[0])), @(MIN(1, mean[1])), @(MIN(1, mean[2])), @1];
+            }
+        }
+        objc_setAssociatedObject(image, &kGlyphInfoKey, known, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
+    if (known.count != 4) return NO;
+    for (int i = 0; i < 4; i++) out[i] = known[i].doubleValue;
+    return YES;
+}
+
+// `image` with every pixel `colour`, its alpha kept.
+static UIImage *painted(UIImage *image, UIColor *colour) {
+    UIGraphicsImageRendererFormat *format = [UIGraphicsImageRendererFormat preferredFormat];
+    format.scale = image.scale;
+    format.opaque = NO;
+    UIGraphicsImageRenderer *renderer = [[UIGraphicsImageRenderer alloc] initWithSize:image.size format:format];
+    UIImage *result = [renderer imageWithActions:^(UIGraphicsImageRendererContext *context) {
+        CGRect rect = {CGPointZero, image.size};
+        [image drawInRect:rect];
+        [colour setFill];
+        UIRectFillUsingBlendMode(rect, kCGBlendModeSourceIn);
+    }];
+    if (image.flipsForRightToLeftLayoutDirection) result = [result imageFlippedForRightToLeftLayoutDirection];
+    return result;
+}
+
+UIImage *SGRSongColourGlyph(UIImage *image) {
+    if (!sg_hasColour || !image || !NSThread.isMainThread) return nil;
+    UIImage *original = objc_getAssociatedObject(image, &kGlyphOriginalKey);
+    if (original) {
+        if ([objc_getAssociatedObject(image, &kGlyphSongKey) unsignedIntegerValue] == sg_songs) return nil;
+        image = original;
+    }
+    // One painting per image and song, however often Spotify sets the image again (a button does on each pass).
+    UIImage *cached = ((SGRWeak *)objc_getAssociatedObject(image, &kGlyphPaintKey)).object;
+    if (cached && [objc_getAssociatedObject(cached, &kGlyphSongKey) unsignedIntegerValue] == sg_songs) return cached;
+    CGFloat c[4], from[3];
+    if (!glyphColour(image, c) || !wornBy(c, YES, from)) return nil;
+    UIImage *paint = painted(image, mapped(c, from));
+    objc_setAssociatedObject(paint, &kGlyphOriginalKey, image, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    objc_setAssociatedObject(paint, &kGlyphSongKey, @(sg_songs), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    SGRWeak *box = [SGRWeak new];
+    box.object = paint;
+    objc_setAssociatedObject(image, &kGlyphPaintKey, box, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    return paint;
+}
+
+#pragma mark - text that stays white
+
+void SGRSongColourKeepWhite(UILabel *label) {
+    if (!label || !SGRSongColourText()) return;
+    if (!objc_getAssociatedObject(label, &kKeepWhiteKey)) objc_setAssociatedObject(label, &kKeepWhiteKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    NSNumber *live = objc_getAssociatedObject(label.textColor, &kLiveKey);
+    if (live && live.doubleValue < 0) label.textColor = [UIColor colorWithWhite:1 alpha:CGColorGetAlpha(label.textColor.CGColor)];
+    NSAttributedString *text = label.attributedText;
+    if (!text.length) return;
+    __block NSMutableAttributedString *copy = nil;
+    [text enumerateAttribute:NSForegroundColorAttributeName inRange:NSMakeRange(0, text.length) options:0
+                  usingBlock:^(id value, NSRange range, BOOL *stop) {
+        NSNumber *tag = [value isKindOfClass:UIColor.class] ? objc_getAssociatedObject(value, &kLiveKey) : nil;
+        if (!tag || tag.doubleValue >= 0) return;
+        if (!copy) copy = [text mutableCopy];
+        [copy addAttribute:NSForegroundColorAttributeName value:[UIColor colorWithWhite:1 alpha:CGColorGetAlpha(((UIColor *)value).CGColor)] range:range];
+    }];
+    if (copy) label.attributedText = copy;
+}
+
+BOOL SGRSongColourKeepsWhite(UILabel *label) {
+    return objc_getAssociatedObject(label, &kKeepWhiteKey) != nil;
+}
+
 #pragma mark - views
 
 // What one view wears itself, and its layer's. A label or a title in an earlier accent takes a live colour.
@@ -567,8 +656,10 @@ static void recolourOne(UIView *view) {
             [button setTitleColor:liveFor(c, from) forState:UIControlStateNormal];
         }
     } else if ([view isKindOfClass:UIImageView.class]) {
-        // A glyph drawn in its tint: what the tint is, only a template shows.
         UIImageView *imageView = (UIImageView *)view;
+        UIImage *glyph = SGRSongColourGlyph(imageView.image);
+        if (glyph) imageView.image = glyph;
+        // A glyph drawn in its tint: what the tint is, only a template shows.
         UIImage *image = imageView.image;
         if (image && (image.renderingMode == UIImageRenderingModeAlwaysTemplate || image.isSymbolImage)
             && components(imageView.tintColor.CGColor, c) && wornBy(c, NO, from)) {
@@ -588,7 +679,7 @@ static BOOL skipped(UIView *view) {
 static void recolourView(UIView *view) {
     if (skipped(view)) return;
     CGFloat c[4];
-    if (SGRSongColourText() && [view isKindOfClass:UILabel.class]) {
+    if (SGRSongColourText() && [view isKindOfClass:UILabel.class] && !SGRSongColourKeepsWhite((UILabel *)view)) {
         UILabel *label = (UILabel *)view;
         if (components(label.textColor.CGColor, c) && white(c)) label.textColor = SGRSongLiveText(c[3]);
     }
@@ -621,34 +712,31 @@ static void recolourWindows(void) {
 }
 
 static void publish(SGRReading reading, CGImageRef glow, CGImageRef blob) {
-    BOOL vibrant = reading.vibrant;
     CGFloat *accent = reading.accent, *text = reading.text;
     if (glow) sg_glow = [UIImage imageWithCGImage:glow];
     if (blob) sg_blob = [UIImage imageWithCGImage:blob];
-    if (vibrant) {
-        CGFloat before[3];
-        if (sg_hasColour) memcpy(before, sg_accent, sizeof(before));
-        else appearanceAccent(before);
-        if (!sg_wornCount) {
-            CGFloat appearance[3];
-            appearanceAccent(appearance);
-            wear(appearance);
-        }
-        wear(before);
-        os_unfair_lock_lock(&sg_lock);
-        memcpy(sg_accent, accent, sizeof(sg_accent));
-        memcpy(sg_text, text, sizeof(sg_text));
-        sg_hasColour = YES;
-        os_unfair_lock_unlock(&sg_lock);
-        sg_songs++;
+    CGFloat before[3];
+    if (sg_hasColour) memcpy(before, sg_accent, sizeof(before));
+    else appearanceAccent(before);
+    if (!sg_wornCount) {
+        CGFloat appearance[3];
+        appearanceAccent(appearance);
+        wear(appearance);
     }
+    wear(before);
+    os_unfair_lock_lock(&sg_lock);
+    memcpy(sg_accent, accent, sizeof(sg_accent));
+    memcpy(sg_text, text, sizeof(sg_text));
+    sg_hasColour = YES;
+    os_unfair_lock_unlock(&sg_lock);
+    sg_songs++;
     [NSNotificationCenter.defaultCenter postNotificationName:SGRSongColourDidChangeNotification object:nil];
-    if (vibrant) recolourWindows();
+    recolourWindows();
 
     static NSUInteger logged;
-    if (logged++ < 12) {
-        SGLog(@"song colour: glow %@, accent %@", glow ? @"ready" : @"none",
-              vibrant ? [NSString stringWithFormat:@"#%02X%02X%02X", (int)(accent[0] * 255), (int)(accent[1] * 255), (int)(accent[2] * 255)] : @"kept (grey cover)");
+    if (logged++ < 40) {
+        SGLog(@"song colour: glow %@, accent #%02X%02X%02X", glow ? @"ready" : @"none",
+              (int)(accent[0] * 255), (int)(accent[1] * 255), (int)(accent[2] * 255));
     }
 }
 
@@ -673,6 +761,38 @@ static NSDictionary *noActions(void) {
         none = @{@"bounds": off, @"position": off, @"frame": off, @"contents": off, @"backgroundColor": off, @"hidden": off};
     });
     return none;
+}
+
+#pragma mark - the glow's clock
+
+// Moving glow keeps one clock for every glow, so going from one screen to another does not jump, and a new
+// speed carries on from where each disc is rather than jumping to where the new one would have it.
+NSNotificationName const SGRSongColourMotionSpeedDidChangeNotification = @"spotifyglass.redesign.songColourMotionSpeedDidChange";
+static CFTimeInterval sg_turnEpoch, sg_turnPeriod[2];   // main thread
+static CGFloat sg_turnPhase[2];                         // at the epoch, a share of a turn
+
+NSInteger SGRSongColourMotionSpeed(void) {
+    return MAX(SGRMotionSpeedMin, MIN(SGRMotionSpeedMax, SGInt(SGRKeySongColourMotionSpeed, SGRMotionSpeedDefault)));
+}
+
+static CFTimeInterval periodOf(NSUInteger disc) {
+    return 60.0 / SGRSongColourMotionSpeed() * (disc ? kSecondTurn : 1);
+}
+
+static CGFloat phaseOf(NSUInteger disc, CFTimeInterval now) {
+    if (!sg_turnPeriod[0]) {
+        sg_turnEpoch = now;
+        for (NSUInteger i = 0; i < 2; i++) sg_turnPeriod[i] = periodOf(i);
+    }
+    return fmod(sg_turnPhase[disc] + (now - sg_turnEpoch) / sg_turnPeriod[disc], 1);
+}
+
+void SGRSongColourMotionSpeedChanged(void) {
+    CFTimeInterval now = CACurrentMediaTime();
+    for (NSUInteger i = 0; i < 2; i++) sg_turnPhase[i] = phaseOf(i, now);
+    for (NSUInteger i = 0; i < 2; i++) sg_turnPeriod[i] = periodOf(i);
+    sg_turnEpoch = now;
+    [NSNotificationCenter.defaultCenter postNotificationName:SGRSongColourMotionSpeedDidChangeNotification object:nil];
 }
 
 // The still glow is one layer, the cover filling the view. Moving glow puts two turning discs of it in
@@ -707,7 +827,16 @@ static NSDictionary *noActions(void) {
     _glows = glows;
     [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(sgr_songColourDidChange)
                                                name:SGRSongColourDidChangeNotification object:nil];
+    if (_turns) {
+        [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(sgr_speedDidChange)
+                                                   name:SGRSongColourMotionSpeedDidChangeNotification object:nil];
+    }
     return self;
+}
+
+- (void)sgr_speedDidChange {
+    for (CALayer *glow in _glows) [glow removeAnimationForKey:@"sgr.turn"];
+    [self sgr_turn];
 }
 
 - (void)dealloc {
@@ -732,22 +861,23 @@ static NSDictionary *noActions(void) {
     }
 }
 
-// Each disc turns about its own middle, for good. No frame rate is asked for: an animation asking for less
-// than the screen's can hold the player's 120 Hz animations down (SGRKaraokeView.m). Every glow keeps time
-// by one clock, so going from one screen to another does not jump.
+// Each disc turns about its own middle, for good, by the glows' one clock. No frame rate is asked for: an
+// animation asking for less than the screen's can hold the player's 120 Hz animations down (SGRKaraokeView.m).
 - (void)sgr_turn {
     if (!_turns) return;
+    CFTimeInterval now = CACurrentMediaTime();
     for (NSUInteger i = 0; i < _glows.count; i++) {
         CALayer *glow = _glows[i];
         if ([glow animationForKey:@"sgr.turn"]) continue;
+        CGFloat phase = phaseOf(i, now);
         CABasicAnimation *turn = [CABasicAnimation animationWithKeyPath:@"transform.rotation.z"];
         turn.fromValue = @0;
         turn.toValue = @(i ? -2 * M_PI : 2 * M_PI);
-        turn.duration = kTurn[i];
+        turn.duration = sg_turnPeriod[i];
         turn.repeatCount = HUGE_VALF;
         // Kept through a trip to the background, which would otherwise take it off.
         turn.removedOnCompletion = NO;
-        turn.timeOffset = fmod(CACurrentMediaTime(), kTurn[i]);
+        turn.timeOffset = phase * sg_turnPeriod[i];
         [glow addAnimation:turn forKey:@"sgr.turn"];
     }
 }

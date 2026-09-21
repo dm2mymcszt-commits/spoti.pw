@@ -185,15 +185,16 @@ static UIViewController *topController(UIWindow *window) {
     return top;
 }
 
-// A three-finger long press anywhere: the screen as it is and the log so far go into one text file,
-// handed to the share sheet so it can be saved or sent to a computer. Nothing listens on the network.
-@interface SGDumpPress : NSObject
-@end
-
-@implementation SGDumpPress
-+ (void)pressed:(UILongPressGestureRecognizer *)press {
-    if (press.state != UIGestureRecognizerStateBegan) return;
-    UIWindow *window = (UIWindow *)press.view;
+// A three-finger long press anywhere, or a shake: the screen as it is and the log so far go into one text
+// file, handed to the share sheet so it can be saved or sent to a computer. Nothing listens on the network.
+// The shake is there for the screens a press does not reach: with a text field in use iOS keeps three-finger
+// touches for its own editing gestures (Search's recent searches, device, 2026-09-21), and a sheet can hold
+// on to them.
+static void shareDump(UIWindow *window) {
+    static CFTimeInterval last;
+    CFTimeInterval now = CACurrentMediaTime();
+    if (now - last < 2) return;
+    last = now;
     NSString *tree = SGScreenTree();
     NSDateFormatter *format = [NSDateFormatter new];
     format.dateFormat = @"yyyyMMdd-HHmmss";
@@ -211,7 +212,25 @@ static UIViewController *topController(UIWindow *window) {
     });
     SGLog(@"dump: %@ shared", name);
 }
+
+@interface SGDumpPress : NSObject
 @end
+
+@implementation SGDumpPress
++ (void)pressed:(UILongPressGestureRecognizer *)press {
+    if (press.state != UIGestureRecognizerStateBegan) return;
+    shareDump((UIWindow *)press.view);
+}
+@end
+
+%group DumpShake
+%hook UIWindow
+- (void)motionEnded:(UIEventSubtype)motion withEvent:(UIEvent *)event {
+    %orig;
+    if (motion == UIEventSubtypeMotionShake) shareDump((UIWindow *)self);
+}
+%end
+%end
 
 static void addDumpPress(UIWindow *window) {
     static char kPressKey;
@@ -246,9 +265,10 @@ static void addDumpPress(UIWindow *window) {
             SGDumpScreen(@"on background");
         }];
         startTreeServer();
+        %init(DumpShake);
         [NSNotificationCenter.defaultCenter addObserverForName:UIWindowDidBecomeKeyNotification object:nil queue:nil usingBlock:^(NSNotification *note) {
             addDumpPress(note.object);
         }];
-        SGLog(@"debug build: backgrounding the app dumps the visible screen's view tree; a three-finger long press shares it with the log");
+        SGLog(@"debug build: backgrounding the app dumps the visible screen's view tree; a three-finger long press or a shake shares it with the log");
     }
 }

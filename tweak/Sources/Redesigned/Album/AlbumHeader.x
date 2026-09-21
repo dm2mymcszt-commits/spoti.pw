@@ -37,7 +37,7 @@ static const CGFloat kMinHero = 120, kMinCover = 80;
 
 static char kHeaderKey, kCoverKey, kTitleKey, kParentKey, kMetaKey, kAddKey, kDownloadKey, kPlayKey, kShuffleKey;
 static char kHeroKey, kHeroHeightKey, kHeaderHeightKey, kInfoKey, kHeaderWatchedKey, kRetryKey;
-static char kExploreKey, kRowWatchedKey, kMoreKey, kPinnedMoreKey;
+static char kExploreKey, kRowWatchedKey, kMoreKey, kPinnedMoreKey, kStretchKey;
 
 #pragma mark - moving Spotify's views
 
@@ -227,6 +227,35 @@ static UIImageView *coverImageIn(UIView *cover) {
     return found ?: empty;
 }
 
+// Fork: pulled down past its top, the page showed its field in a flat band over the cover, which looked cut
+// off (device, 2026-09-21). The cover reaches up into the band instead, growing from where it rests the way the
+// Music app's does, its picture filling the taller hero. The page scrolls in
+// PCFFTabLayoutViewController.containerScrollView (trees: dumps/4.txt), the header at the top of its content;
+// the hero is drawn from the top of what the scroll view shows, when that is above the header.
+static UIScrollView *scrollOf(UIView *header) {
+    for (UIView *v = header.superview; v; v = v.superview) {
+        if ([v isKindOfClass:UIScrollView.class]) return (UIScrollView *)v;
+    }
+    return nil;
+}
+
+static void placeHero(SGRAlbumHero *hero, UIView *header, UIScrollView *scroll) {
+    CGFloat rest = [objc_getAssociatedObject(hero, &kHeroHeightKey) doubleValue];
+    if (rest < kMinHero || hero.superview != header) return;
+    CGFloat top = scroll ? [header convertPoint:scroll.bounds.origin fromView:scroll].y : 0;
+    CGFloat pull = MAX(0, -top);
+    setFrame(hero, CGRectMake(0, -pull, header.bounds.size.width, rest + pull));
+}
+
+%hook UIScrollView
+- (void)setContentOffset:(CGPoint)offset {
+    %orig;
+    NSHashTable<SGRAlbumHero *> *heroes = objc_getAssociatedObject(self, &kStretchKey);
+    if (!heroes.count) return;
+    for (SGRAlbumHero *hero in heroes) placeHero(hero, hero.superview, (UIScrollView *)self);
+}
+%end
+
 // The picture runs from the top of the header down past where its text begins, so the title and the artist
 // sit on the bottom of its dissolve; below that the page's field is already drawing the very colour the
 // picture dissolves into, so there is no seam to see.
@@ -250,7 +279,14 @@ static void applyHero(UIView *header, UIView *cover, CGFloat bottom) {
         SGLog(@"redesign album: hero %.0fpt across the top of the header", height);
     }
     if (height < kMinHero) return;
-    setFrame(hero, CGRectMake(0, 0, header.bounds.size.width, height));
+    UIScrollView *scroll = scrollOf(header);
+    NSHashTable<SGRAlbumHero *> *heroes = scroll ? objc_getAssociatedObject(scroll, &kStretchKey) : nil;
+    if (scroll && !heroes) {
+        heroes = [NSHashTable weakObjectsHashTable];
+        objc_setAssociatedObject(scroll, &kStretchKey, heroes, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
+    if (heroes && ![heroes containsObject:hero]) [heroes addObject:hero];
+    placeHero(hero, header, scroll);
     hero.fieldColor = SGRAlbumFieldColor(header);
 
     [hero followCover:coverImageIn(cover)];

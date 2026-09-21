@@ -16,6 +16,7 @@
 // 2026-09-17). So the colour is read off that layer, and the layer is hidden rather than cleared, since Spotify fills it again.
 #import "Core/SGCore.h"
 #import "Redesigned/Kit/SGRKit.h"
+#import "Redesigned/Kit/SGRSongColour.h"
 #import "Search.h"
 
 // The tint the glass takes of the card's colour, and how dark the far corner of the colour under it gets.
@@ -148,10 +149,14 @@ static void paint(SGRSearchCardParts *parts, UIColor *color) {
     }
 }
 
-// The title's own position, before the move, is where Spotify's layout put its centre.
+// The title's own position, before the move, is where Spotify's layout put its centre. Fork: it stays white,
+// which Tint text would turn the song's colour (SGRSongColour.h): a light blue title on a purple card.
 static void moveTitleIn(UIView *content) {
     for (UIView *sub in content.subviews) {
         if (![NSStringFromClass(sub.class) containsString:@"EncoreLabel"]) continue;
+        for (UIView *label in sub.subviews) {
+            if ([label isKindOfClass:UILabel.class] && !SGRSongColourKeepsWhite((UILabel *)label)) SGRSongColourKeepWhite((UILabel *)label);
+        }
         CGPoint origin = CGPointMake(sub.center.x - sub.bounds.size.width / 2, sub.center.y - sub.bounds.size.height / 2);
         CGAffineTransform moved = CGAffineTransformMakeTranslation(MAX(0, kTitleInset - origin.x), MAX(0, kTitleInset - origin.y));
         if (!CGAffineTransformEqualToTransform(sub.transform, moved)) sub.transform = moved;
