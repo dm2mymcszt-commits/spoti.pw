@@ -7,6 +7,7 @@
 // out of reach.
 #import "Core/SGCore.h"
 #import "SGRAccent.h"
+#import "SGRSongColour.h"
 #import "Settings/SGPageStyle.h"
 
 // The greens the app is known to build from literals: the token, and the older brand green the
@@ -78,7 +79,9 @@ static BOOL swap(CGFloat *r, CGFloat *g, CGFloat *b) {
         unpack(kGreens[i], &gr, &gg, &gb);
         if (fabs(*r - gr) > 0.01 || fabs(*g - gg) > 0.01 || fabs(*b - gb) > 0.01) continue;
         CGFloat ar, ag, ab;
-        unpack((uint32_t)sg_accent, &ar, &ag, &ab);
+        // Fork: with Song colour on, the accent is the playing cover's (SGRSongColour.h) until a grey cover
+        // leaves the stored one standing. Read here rather than at launch, so what is drawn next is the song's.
+        if (!SGRSongColour() || !SGRSongAccent(&ar, &ag, &ab)) unpack((uint32_t)sg_accent, &ar, &ag, &ab);
         CGFloat factor = MAX(gr, MAX(gg, gb)) / (0xD7 / 255.0);
         *r = MIN(1, ar * factor);
         *g = MIN(1, ag * factor);

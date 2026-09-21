@@ -4,6 +4,7 @@
 #import "SGRBridges.h"
 #import "SGRPalette.h"
 #import "SGRTokens.h"
+#import "SGRSongColour.h"
 
 NSNotificationName const SGRFieldColorDidChangeNotification = @"spotifyglass.redesign.fieldColorDidChange";
 
@@ -42,6 +43,13 @@ static NSDictionary *noActions(void) {
     NSString *_identity;
     NSUInteger _generation;
     BOOL _read;
+    SGRSongGlowView *_songGlow;
+}
+
+// Fork: with Song colour on, a page's field wears the playing song's glow (SGRSongColour.h) rather than its
+// own cover's colour. The player's field, the one with a backdrop, keeps its own: it is the song's already.
+- (BOOL)sgr_wearsSong {
+    return SGRSongColour() && !_showsBackdrop;
 }
 
 - (instancetype)initWithFrame:(CGRect)frame {
@@ -103,6 +111,11 @@ static NSDictionary *noActions(void) {
     _backdrop.frame = CGRectMake(0, 0, bounds.size.width, [self backdropHeightNow]);
     _flow.frame = CGRectMake(0, 0, bounds.size.width, [self backdropHeightNow]);
     [CATransaction commit];
+    if ([self sgr_wearsSong]) {
+        if (!_songGlow) _songGlow = [SGRSongGlowView new];
+        if (_songGlow.superview != self) [self addSubview:_songGlow];
+        if (!CGRectEqualToRect(_songGlow.frame, bounds)) _songGlow.frame = bounds;
+    }
 }
 
 #pragma mark - the moving field
@@ -189,12 +202,12 @@ static NSDictionary *noActions(void) {
 }
 
 - (void)setProvisionalColor:(UIColor *)color {
-    if (_read || !color) return;
+    if (_read || !color || [self sgr_wearsSong]) return;
     [self applyColor:SGRFieldColorFor(color) animated:self.window != nil];
 }
 
 - (void)setPreferredColor:(UIColor *)color {
-    if (!color) return;
+    if (!color || [self sgr_wearsSong]) return;
     UIColor *fit = SGRFieldColorFor(color);
     if (_preferred && CGColorEqualToColor(fit.CGColor, _preferred.CGColor)) return;
     _preferred = fit;
@@ -202,6 +215,7 @@ static NSDictionary *noActions(void) {
 }
 
 - (void)setArtwork:(UIImage *)image identity:(NSString *)identity animated:(BOOL)animated {
+    if ([self sgr_wearsSong]) return;
     if (!image || image == _image || (identity && [identity isEqualToString:_identity])) return;
     _image = image;
     _identity = [identity copy];

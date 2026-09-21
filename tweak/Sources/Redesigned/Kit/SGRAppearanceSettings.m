@@ -2,6 +2,7 @@
 #import "Settings/SGModPage.h"
 #import "Settings/SGPageStyle.h"
 #import "SGRAccent.h"
+#import "SGRSongColour.h"
 
 // Going back to Spotify's green is offered only once a colour of the mod's is set, so a stray tap
 // cannot wipe it.
@@ -25,5 +26,8 @@ static void chooseAccent(void) {
 NSArray<SGModRow *> *SGRAppearanceRows(void) {
     return @[
         SGWithSymbol(SGStatActionRow(@"Accent colour", nil, ^NSString *{ return SGRAccentLabel(); }, ^{ chooseAccent(); }), @"paintpalette"),
+        // Fork: the playing song's colour everywhere (SGRSongColour.h).
+        SGWithSymbol(SGSwitchRow(@"Song colour", @"Every screen glows with the playing cover, and its most vibrant colour replaces the accent", SGRKeySongColour), @"circle.hexagongrid.fill"),
+        SGWithSymbol(SGSwitchRow(@"Tint text", @"White text takes a light shade of the song's colour, with Song colour on", SGRKeySongColourText), @"textformat"),
     ];
 }

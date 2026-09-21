@@ -2,6 +2,8 @@
 // is the now playing bar's card from the album-colour paint.
 #import "Core/SGCore.h"
 #import "SGRRepaint.h"
+#import "SGRField.h"
+#import "SGRSongColour.h"
 
 __weak UIView *sgr_nowPlayingRoot = nil;
 __weak UIView *sgr_nowPlayingCard = nil;
@@ -12,7 +14,7 @@ __weak UIView *sgr_artistRoot = nil;
 
 %hook CALayer
 - (void)setBackgroundColor:(CGColorRef)color {
-    if (color && (sgr_nowPlayingRoot || sgr_lyricsPageRoot || sgr_playlistRoot || sgr_albumRoot || sgr_artistRoot)) {
+    if (color && (sgr_nowPlayingRoot || sgr_lyricsPageRoot || sgr_playlistRoot || sgr_albumRoot || sgr_artistRoot || SGRSongColour())) {
         UIView *view = (UIView *)self.delegate;
         if ([view isKindOfClass:UIView.class] && view.layer == self && !SGKeepsColor(view)) {
             if (SGIsInside(view, sgr_nowPlayingRoot)) {
@@ -26,6 +28,9 @@ __weak UIView *sgr_artistRoot = nil;
                 color = NULL;
             } else if (SGIsBaseSurface(color) && (SGIsInside(view, sgr_playlistRoot) || SGIsInside(view, sgr_albumRoot) || SGIsInside(view, sgr_artistRoot))) {
                 color = NULL;
+            } else if (SGIsBaseSurface(color) && SGRSongColourClears(view)) {
+                // Fork: a screen wearing the song's glow (SGRSongColour.h).
+                color = NULL;
             }
         } else if (SGIsBaseSurface(color) && ![view isKindOfClass:UIView.class]) {
             // Fork: a layer of its own rather than a view's. Spotify paints parts of the sections under an
@@ -35,7 +40,9 @@ __weak UIView *sgr_artistRoot = nil;
             CALayer *layer = self.superlayer;
             while (layer && ![layer.delegate isKindOfClass:UIView.class]) layer = layer.superlayer;
             UIView *host = (UIView *)layer.delegate;
-            if (host && (SGIsInside(host, sgr_playlistRoot) || SGIsInside(host, sgr_albumRoot) || SGIsInside(host, sgr_artistRoot))) {
+            // The field and the glow paint on sublayers of their own on purpose, and keep them.
+            BOOL own = [host isKindOfClass:SGRArtworkField.class] || [host isKindOfClass:SGRSongGlowView.class];
+            if (host && !own && (SGIsInside(host, sgr_playlistRoot) || SGIsInside(host, sgr_albumRoot) || SGIsInside(host, sgr_artistRoot) || SGRSongColourClears(host))) {
                 color = NULL;
             }
         }
