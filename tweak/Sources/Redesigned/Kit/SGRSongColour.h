@@ -18,18 +18,32 @@
 // one. Colours a layer was handed as a CGColor are taken over by a walk over the windows. The glows
 // crossfade. A grey or black and white cover leaves the accent and the text as they were.
 //
+// Every accent worn since launch is remembered, the Appearance one first, because the walk only sees what
+// is in a window: a play indicator, a checkmark or a cell sitting in a reuse queue while the song changed
+// kept that song's colour, and a later walk, looking for the colour just replaced, never matched it again
+// (device, 2026-09-21: an earlier song's pink indicator on a teal song, the Appearance green on shuffle,
+// repeat and checkmarks an hour in). A colour of any worn accent is taken to the playing one by the walk,
+// and again as its view joins a window (SGRSongColourCatchUp). Spotify's icons (SPTEncoreIconView, in
+// SpotifyShared) draw from colours of their own and are handed live ones.
+//
+// Moving glow (off until asked for) turns the glow the way the reference theme does: two soft copies of the
+// cover, off centre, each rotating slowly about its own middle. Core Animation runs it, but everything over
+// it is composited again on every frame, the glass included, so it costs battery.
+//
 // Threading: the colours are read from any thread (layers are painted off the main one), under a lock;
 // everything else is main thread only.
 #import <UIKit/UIKit.h>
 
 #define SGRKeySongColour @"spotifyglass.redesign.songColour"
 #define SGRKeySongColourText @"spotifyglass.redesign.songColourText"
+#define SGRKeySongColourMotion @"spotifyglass.redesign.songColourMotion"
 
 // Posted on the main thread when the colours of a new song are in.
 extern NSNotificationName const SGRSongColourDidChangeNotification;
 
 BOOL SGRSongColour(void);       // the switch, read at launch
 BOOL SGRSongColourText(void);   // Tint text, read at launch; NO while Song colour is off
+BOOL SGRSongColourMotion(void); // Moving glow, read at launch; NO while Song colour is off
 
 // The current colours, NO until a cover has been read (or while it is grey). Any thread.
 BOOL SGRSongAccent(CGFloat *r, CGFloat *g, CGFloat *b);
@@ -53,3 +67,7 @@ void SGRSongColourStart(void);
 void SGRSongColourAdopt(UIView *root);
 // Whether `view` sits inside an adopted root. Main thread; NO from any other.
 BOOL SGRSongColourClears(UIView *view);
+
+// Takes whatever `view` itself wears in an earlier song's accent to the playing one: its own colours and
+// its layer's, not its subviews', which arrive in a window each on their own. From -didMoveToWindow.
+void SGRSongColourCatchUp(UIView *view);

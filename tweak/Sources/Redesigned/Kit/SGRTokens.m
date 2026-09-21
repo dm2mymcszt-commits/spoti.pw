@@ -2,6 +2,7 @@
 #import "Core/SGCore.h"
 #import "SGRTokens.h"
 #import "SGRAccent.h"
+#import "SGRSongColour.h"
 
 const CGFloat SGRSideMargin = 16;
 const CGFloat SGRGrid = 8;
@@ -32,8 +33,16 @@ UIColor *SGRTertiary(void) {
 }
 
 // Read per call: the accent is stored as it is picked, and the colour row reads it the same way.
+// Fork: with Song colour on, a live colour that follows the song (SGRSongColour.h), so what the redesign
+// paints in the accent itself follows too: the tab bar's selected icon and the pages' action buttons kept
+// the stored green (device, 2026-09-21). One object for good, so a view comparing its colour with this one
+// sees no change and does not set it again on every pass.
 UIColor *SGRAccent(void) {
-    return SGRAccentColor() ?: [UIColor colorWithRed:0x1E / 255.0 green:0xD7 / 255.0 blue:0x60 / 255.0 alpha:1];
+    UIColor *fixed = SGRAccentColor() ?: [UIColor colorWithRed:0x1E / 255.0 green:0xD7 / 255.0 blue:0x60 / 255.0 alpha:1];
+    static UIColor *live;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ live = SGRSongLiveAccent(1, 1, fixed); });
+    return live ?: fixed;
 }
 
 UIColor *SGRNeutralField(void) {

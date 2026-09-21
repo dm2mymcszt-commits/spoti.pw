@@ -81,7 +81,9 @@ static BOOL swapTo(CGFloat *r, CGFloat *g, CGFloat *b, BOOL song, CGFloat *facto
         unpack(kGreens[i], &gr, &gg, &gb);
         if (fabs(*r - gr) > 0.01 || fabs(*g - gg) > 0.01 || fabs(*b - gb) > 0.01) continue;
         CGFloat ar, ag, ab;
-        if (!song || !SGRSongColour() || !SGRSongAccent(&ar, &ag, &ab)) unpack((uint32_t)sg_accent, &ar, &ag, &ab);
+        // Fork: with Spotify's own green kept (sg_accent < 0) the hooks run for Song colour alone, and the
+        // green stands until a song's accent is in.
+        if (!song || !SGRSongColour() || !SGRSongAccent(&ar, &ag, &ab)) unpack(sg_accent >= 0 ? (uint32_t)sg_accent : kGreens[0], &ar, &ag, &ab);
         CGFloat factor = MAX(gr, MAX(gg, gb)) / (0xD7 / 255.0);
         *r = MIN(1, ar * factor);
         *g = MIN(1, ag * factor);
@@ -192,5 +194,5 @@ static id swappedValue(id value) {
 %ctor {
     if (!SGRedesignedUI()) return;
     sg_accent = chosen();
-    if (sg_accent >= 0) %init;
+    if (sg_accent >= 0 || SGRSongColour()) %init;
 }

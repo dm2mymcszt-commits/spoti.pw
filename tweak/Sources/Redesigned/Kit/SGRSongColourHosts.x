@@ -54,14 +54,18 @@
 
 // Spotify paints a cell its base surface before the cell is in the list, so the repaint hook, which asks
 // where a view is, let it through, and Home came out black under its header (device, 2026-09-21). A view
-// arriving in a window inside a glowing screen is cleared as it arrives.
+// arriving in a window inside a glowing screen is cleared as it arrives. And whatever it still wears of an
+// earlier song, having been out of a window while the song changed, takes the playing one's colours.
 %hook UIView
 - (void)didMoveToWindow {
     %orig;
     UIView *view = (UIView *)self;
+    if (!view.window) return;
     CGColorRef bg = view.layer.backgroundColor;
-    if (!view.window || !bg || !SGIsBaseSurface(bg) || SGKeepsColor(view) || [view isKindOfClass:SGRSongGlowView.class]) return;
-    if (SGRSongColourClears(view)) view.layer.backgroundColor = NULL;
+    if (bg && SGIsBaseSurface(bg) && !SGKeepsColor(view) && ![view isKindOfClass:SGRSongGlowView.class] && SGRSongColourClears(view)) {
+        view.layer.backgroundColor = NULL;
+    }
+    SGRSongColourCatchUp(view);
 }
 %end
 

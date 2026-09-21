@@ -29,5 +29,6 @@ NSArray<SGModRow *> *SGRAppearanceRows(void) {
         // Fork: the playing song's colour everywhere (SGRSongColour.h).
         SGWithSymbol(SGSwitchRow(@"Song colour", @"Every screen glows with the playing cover, and its most vibrant colour replaces the accent", SGRKeySongColour), @"circle.hexagongrid.fill"),
         SGWithSymbol(SGSwitchRow(@"Tint text", @"White text takes a light shade of the song's colour, with Song colour on", SGRKeySongColourText), @"textformat"),
+        SGWithSymbol(SGOptionRow(@"Moving glow", @"The glow turns slowly behind the screens, with Song colour on. Uses more battery", SGRKeySongColourMotion), @"rotate.right"),
     ];
 }
