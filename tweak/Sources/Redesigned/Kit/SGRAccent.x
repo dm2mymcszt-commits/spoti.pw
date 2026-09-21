@@ -99,11 +99,17 @@ static BOOL swap(CGFloat *r, CGFloat *g, CGFloat *b) {
 // Fork: with Song colour on, Spotify's green becomes a live colour (SGRSongColour.h) that resolves to the
 // playing cover's accent whenever it is drawn, the stored accent until the first song is read. Spotify makes
 // its green once and keeps it, so a colour fixed here stayed the first song's.
+// The init hook must return `instancetype`: Logos only gives a hook init's ownership rules (self consumed,
+// result retained) when it returns id or instancetype. As `UIColor *` it handed back the live colour
+// autoreleased to a caller that owns what init returns, which released it once too often and crashed
+// Spotify at launch (crash log, 2026-09-21: objc_release in an autorelease pool pop, off the main thread).
+// A subclass that initialises itself through super keeps its own object.
 %hook UIColor
-- (UIColor *)initWithRed:(CGFloat)r green:(CGFloat)g blue:(CGFloat)b alpha:(CGFloat)a {
+- (instancetype)initWithRed:(CGFloat)r green:(CGFloat)g blue:(CGFloat)b alpha:(CGFloat)a {
     CGFloat factor = 1;
     if (!swapTo(&r, &g, &b, NO, &factor)) return %orig(r, g, b, a);
     UIColor *fixed = %orig(r, g, b, a);
+    if (fixed == self) return fixed;
     return SGRSongLiveAccent(factor, a, fixed) ?: fixed;
 }
 + (UIColor *)colorWithRed:(CGFloat)r green:(CGFloat)g blue:(CGFloat)b alpha:(CGFloat)a {
