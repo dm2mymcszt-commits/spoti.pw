@@ -5,3 +5,5 @@
 BOOL SGIsDebugBuild(void);
 NSString *SGScreenTree(void);
 void SGDumpScreen(NSString *reason);
+// Debug builds: after `delay`, the screen then showing and the log go to the share sheet, as a shake does.
+void SGShareDumpAfter(NSTimeInterval delay);

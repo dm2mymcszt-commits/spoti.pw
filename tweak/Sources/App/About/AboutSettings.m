@@ -2,6 +2,7 @@
 #import "Settings/SGPageStyle.h"
 #import "About.h"
 #import "App/Onboarding/Onboarding.h"
+#import "Diagnostics/Diagnostics.h"
 
 // Every key of the mod's is under one prefix, so a reset is a sweep of the defaults with the stock
 // marker of SGPrefs.h left behind; the hooks read them at launch, so it ends in a restart.
@@ -41,7 +42,15 @@ UIViewController *SGAboutPage(void) {
     // The row reads out where the build stands and opens the changelog of everything newer than it.
     SGModRow *updates = SGPageRow(@"Updates", ^UIViewController *{ return SGUpdatePage(); });
     updates.value = ^NSString *{ return SGUpdateStatus(); };
-    return [[SGModPage alloc] initWithTitle:@"Mod" intro:nil sections:@[
+    // Fork: debug builds only. Time to leave the settings for the screen wanted, then the dump is shared, for
+    // a screen neither a press nor a shake reaches.
+    NSMutableArray<SGModSection *> *debug = [NSMutableArray array];
+    if (SGIsDebugBuild()) {
+        [debug addObject:SGSection(@"Debug", @[
+            withSymbol(SGActionRow(@"Share a screen dump in 8 seconds", @"Go to the screen to dump; the share sheet comes up there", ^{ SGShareDumpAfter(8); }), @"timer"),
+        ])];
+    }
+    return [[SGModPage alloc] initWithTitle:@"Mod" intro:nil sections:[debug arrayByAddingObjectsFromArray:@[
         SGSection(nil, @[
             updates,
             SGStatRow(@"Version", ^NSString *{ return @(SG_VERSION); }),
@@ -57,5 +66,5 @@ UIViewController *SGAboutPage(void) {
             withSymbol(SGActionRow(@"Import settings", nil, ^{ SGImportSettings(); }), @"square.and.arrow.down"),
         ]),
         SGSection(nil, @[reset]),
-    ] footer:nil];
+    ]] footer:nil];
 }

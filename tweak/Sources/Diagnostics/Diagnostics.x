@@ -179,22 +179,59 @@ static NSString *recentLog(void) {
     return out;
 }
 
-static UIViewController *topController(UIWindow *window) {
-    UIViewController *top = window.rootViewController;
-    while (top.presentedViewController && !top.presentedViewController.isBeingDismissed) top = top.presentedViewController;
-    return top;
+// A three-finger long press anywhere, a shake, or the Mod page's timed row: the screen as it is and the log
+// so far go into one text file, handed to the share sheet so it can be saved or sent to a computer. Nothing
+// listens on the network. The shake and the timer are there for the screens a press does not reach: with a
+// text field in use iOS keeps three-finger touches for its own editing gestures (Search's recent searches,
+// device, 2026-09-21).
+//
+// The sheet comes up in a window of its own, over everything. Shown from the top of the app's presented
+// controllers it depended on Spotify's: the player's overlay container stays presented with the player shut
+// (dumps/1.txt, 2.txt), and once that chain was in a state iOS would not present from, every press and shake
+// was dropped without a word (device, 2026-09-22).
+static UIWindow *sg_shareWindow;
+
+static UIWindowScene *sceneFor(UIWindow *window) {
+    if (window.windowScene) return window.windowScene;
+    for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
+        if ([scene isKindOfClass:UIWindowScene.class] && scene.activationState == UISceneActivationStateForegroundActive) return (UIWindowScene *)scene;
+    }
+    return nil;
 }
 
-// A three-finger long press anywhere, or a shake: the screen as it is and the log so far go into one text
-// file, handed to the share sheet so it can be saved or sent to a computer. Nothing listens on the network.
-// The shake is there for the screens a press does not reach: with a text field in use iOS keeps three-finger
-// touches for its own editing gestures (Search's recent searches, device, 2026-09-21), and a sheet can hold
-// on to them.
+static void presentShare(NSURL *file, UIWindowScene *scene) {
+    if (!scene) {
+        SGLog(@"dump: no scene to show the share sheet in");
+        return;
+    }
+    if (!sg_shareWindow || sg_shareWindow.windowScene != scene) {
+        sg_shareWindow = [[UIWindow alloc] initWithWindowScene:scene];
+        sg_shareWindow.windowLevel = UIWindowLevelAlert + 100;
+        sg_shareWindow.backgroundColor = UIColor.clearColor;
+        UIViewController *root = [UIViewController new];
+        root.view.backgroundColor = UIColor.clearColor;
+        sg_shareWindow.rootViewController = root;
+    }
+    UIViewController *root = sg_shareWindow.rootViewController;
+    if (root.presentedViewController) [root dismissViewControllerAnimated:NO completion:nil];
+    sg_shareWindow.hidden = NO;
+    UIActivityViewController *share = [[UIActivityViewController alloc] initWithActivityItems:@[file] applicationActivities:nil];
+    share.completionWithItemsHandler = ^(UIActivityType type, BOOL completed, NSArray *items, NSError *error) {
+        sg_shareWindow.hidden = YES;
+    };
+    share.popoverPresentationController.sourceView = root.view;
+    share.popoverPresentationController.sourceRect = CGRectMake(CGRectGetMidX(root.view.bounds), CGRectGetMidY(root.view.bounds), 0, 0);
+    [root presentViewController:share animated:YES completion:^{
+        SGLog(@"dump: share sheet up");
+    }];
+}
+
 static void shareDump(UIWindow *window) {
     static CFTimeInterval last;
     CFTimeInterval now = CACurrentMediaTime();
     if (now - last < 2) return;
     last = now;
+    UIWindowScene *scene = sceneFor(window);
     NSString *tree = SGScreenTree();
     NSDateFormatter *format = [NSDateFormatter new];
     format.dateFormat = @"yyyyMMdd-HHmmss";
@@ -203,14 +240,22 @@ static void shareDump(UIWindow *window) {
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
         NSString *text = [NSString stringWithFormat:@"%@\n== log (last 10 min)\n%@", tree, recentLog()];
         [text writeToURL:file atomically:YES encoding:NSUTF8StringEncoding error:nil];
-        dispatch_async(dispatch_get_main_queue(), ^{
-            UIActivityViewController *share = [[UIActivityViewController alloc] initWithActivityItems:@[file] applicationActivities:nil];
-            UIViewController *top = topController(window);
-            share.popoverPresentationController.sourceView = top.view;
-            [top presentViewController:share animated:YES completion:nil];
-        });
+        dispatch_async(dispatch_get_main_queue(), ^{ presentShare(file, scene); });
     });
-    SGLog(@"dump: %@ shared", name);
+    SGLog(@"dump: %@ written", name);
+}
+
+void SGShareDumpAfter(NSTimeInterval delay) {
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        UIWindow *key = nil;
+        for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
+            if (![scene isKindOfClass:UIWindowScene.class]) continue;
+            for (UIWindow *window in ((UIWindowScene *)scene).windows) {
+                if (window.isKeyWindow) key = window;
+            }
+        }
+        shareDump(key);
+    });
 }
 
 @interface SGDumpPress : NSObject
@@ -223,11 +268,20 @@ static void shareDump(UIWindow *window) {
 }
 @end
 
+// A shake goes to the first responder and up the chain, where any of Spotify's screens can keep it, so it is
+// looked for where every event passes as well: the application's own dispatch.
 %group DumpShake
 %hook UIWindow
 - (void)motionEnded:(UIEventSubtype)motion withEvent:(UIEvent *)event {
     %orig;
     if (motion == UIEventSubtypeMotionShake) shareDump((UIWindow *)self);
+}
+%end
+
+%hook UIApplication
+- (void)sendEvent:(UIEvent *)event {
+    %orig;
+    if (event.type == UIEventTypeMotion && event.subtype == UIEventSubtypeMotionShake) shareDump(nil);
 }
 %end
 %end
