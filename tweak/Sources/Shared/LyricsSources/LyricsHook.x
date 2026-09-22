@@ -31,7 +31,7 @@
 // for the lyrics as it would for any track, and the reply is answered as above.
 #import "Core/SGCore.h"
 #import "LyricsSources.h"
-#import "Shared/Lyrics/Protobuf.h"
+#import "Shared/AdBlock/Protobuf.h"
 #import "Headers/SPTPlayer.h"
 
 // Blinding Lights, The Weeknd: lyrics in every market Spotify serves them in.
