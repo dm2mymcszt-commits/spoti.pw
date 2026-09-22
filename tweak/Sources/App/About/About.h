@@ -45,7 +45,6 @@ void SGUsageNoteAsked(void);
 // page and takes effect at once.
 #define SGKeyUpdateNotice @"spotifyglass.update.notice"
 void SGWatchForUpdates(void);
-BOOL SGUpdateNoticeShown(void);   // this run, so the donate sheet stays out of its way
 
 
 // Whether the now playing card on the lock screen can open this build. It depends on the signature,

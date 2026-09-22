@@ -15,10 +15,6 @@ static const NSInteger kTries = 15;        // a minute of waiting for the screen
 
 static BOOL sg_offered;   // once a run, whatever else happens
 
-BOOL SGUpdateNoticeShown(void) {
-    return sg_offered;
-}
-
 // Everything that has changed since this build, newest release first, which is what the sheet counts
 // and reads the first lines of.
 static NSArray<SGUpdateChange *> *changesSinceThisBuild(void) {
