@@ -7,6 +7,11 @@
 #               GITHUB_TOKEN can't push commits that touch .github/workflows, and upstream's do.
 #   IPA_URL     direct link to the decrypted Spotify IPA the build injects into.
 #
+# Variable (Settings → Secrets and variables → Actions → Variables):
+#   UPSTREAM_REF  a branch, tag or commit of skopevoj/spoti.pw that `main` and `mine` follow instead of its
+#                 main. Held at 5705ca1 (just after 0.21.1, still GPL-3.0) since 2026-09-23: from 0.22.0 upstream
+#                 is under the PolyForm Strict License. Unset, or `main`, follows upstream again.
+#
 # If one of `mine`'s commits no longer applies on top of upstream, the run fails and changes
 # nothing; GitHub emails you about the failed run. Resolve the rebase by hand, then run it again.
 name: Sync upstream and build
@@ -40,18 +45,21 @@ jobs:
       - name: Fetch upstream
         run: |
           git remote add upstream https://github.com/skopevoj/spoti.pw.git
-          git fetch --no-tags upstream main
+          ref="${{ vars.UPSTREAM_REF || 'main' }}"
+          git fetch --no-tags upstream "$ref"
+          git branch -f upstream-base FETCH_HEAD
+          echo "Following upstream at \`$ref\` ($(git rev-parse --short upstream-base))." >> "$GITHUB_STEP_SUMMARY"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
       - name: Fast-forward main to upstream
-        run: git push origin upstream/main:refs/heads/main
+        run: git push origin upstream-base:refs/heads/main
 
       - name: Replay mine on top of upstream
         id: rebase
         run: |
           before=$(git rev-parse HEAD)
-          if ! git rebase upstream/main; then
+          if ! git rebase upstream-base; then
             git rebase --abort
             echo "::error::A commit on 'mine' conflicts with upstream. Nothing was pushed to 'mine'; rebase it by hand."
             exit 1
