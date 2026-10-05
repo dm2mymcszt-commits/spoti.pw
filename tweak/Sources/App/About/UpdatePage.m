@@ -15,6 +15,7 @@
 @property (nonatomic, copy) NSString *subtitle;
 @property (nonatomic, copy) NSString *symbol;
 @property (nonatomic, copy) NSString *key;              // a switch row, on until it is switched off
+@property (nonatomic) BOOL offUntilAsked;               // or off until it is switched on (fork)
 @property (nonatomic, copy) NSString *(^value)(void);   // read out on the right, again once a second
 @property (nonatomic, copy) void (^action)(void);
 @end
@@ -141,9 +142,18 @@ static NSArray<SGUpdateRelease *> *releasesToShow(void) {
 
     SGUpdateRow *notice = [SGUpdateRow new];
     notice.title = @"Auto check updates";
+    notice.subtitle = @"Says when upstream has a new release, once for each. Its build has none of this fork's changes";
     notice.symbol = @"bell";
     notice.key = SGKeyUpdateNotice;
-    [groups addObject:group(nil, @[notice])];
+    notice.offUntilAsked = YES;
+    // Fork: the count had no switch of its own, and went out once a day whatever the one above said.
+    SGUpdateRow *usage = [SGUpdateRow new];
+    usage.title = @"Count this install";
+    usage.subtitle = @"Once a day, tells spoti.pw an id for this install, its versions, device, language, region and which switches are on";
+    usage.symbol = @"number";
+    usage.key = SGKeyUsage;
+    usage.offUntilAsked = YES;
+    [groups addObject:group(nil, @[notice, usage])];
 
     for (SGUpdateRelease *release in releasesToShow()) {
         NSMutableArray<NSString *> *kinds = [NSMutableArray array];
@@ -279,7 +289,7 @@ static NSArray<SGUpdateRelease *> *releasesToShow(void) {
     if (row.key) {
         UISwitch *toggle = [UISwitch new];
         toggle.onTintColor = SGGreen();
-        toggle.on = SGEnabled(row.key);
+        toggle.on = SGFlag(row.key, !row.offUntilAsked);
         toggle.accessibilityLabel = row.title;
         [toggle addTarget:self action:@selector(toggled:) forControlEvents:UIControlEventValueChanged];
         cell.accessoryView = toggle;

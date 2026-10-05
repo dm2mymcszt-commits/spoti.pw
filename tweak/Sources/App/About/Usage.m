@@ -22,9 +22,12 @@ static NSString *const kInstall = @"spotipw.install";
 static NSString *const kAsked = @"spotipw.asked";
 
 // Not SGEnabled: after a reset that reads every unset switch as off, and this is not one of them.
+// Fork: off until switched on (Mod > Updates > Count this install). Upstream counts installs with it, on
+// unless stored otherwise and with no switch to store it; this fork is not one of its installs, and the
+// body names the device, the region and the ad and Premium switches.
 static BOOL usageOn(void) {
     id stored = [NSUserDefaults.standardUserDefaults objectForKey:SGKeyUsage];
-    return stored ? [stored boolValue] : YES;
+    return stored ? [stored boolValue] : NO;
 }
 
 // Asked on every return to the front, so the formatter is made once.

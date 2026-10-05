@@ -15,6 +15,12 @@ static const NSInteger kTries = 15;        // a minute of waiting for the screen
 
 static BOOL sg_offered;   // once a run, whatever else happens
 
+// Fork: off until asked for. The release it announces is upstream's, and its build has none of this fork's
+// changes, so Get it would replace the fork with it.
+BOOL SGUpdateNoticeOn(void) {
+    return SGFlag(SGKeyUpdateNotice, NO);
+}
+
 // Everything that has changed since this build, newest release first, which is what the sheet counts
 // and reads the first lines of.
 static NSArray<SGUpdateChange *> *changesSinceThisBuild(void) {
@@ -39,7 +45,7 @@ static NSString *noticeBody(NSString *version) {
 static void offerWhenClear(NSInteger tries) {
     if (sg_offered) return;
     NSString *version = SGUpdateVersion();
-    if (!version || !SGEnabled(SGKeyUpdateNotice)) return;
+    if (!version || !SGUpdateNoticeOn()) return;
     if ([[NSUserDefaults.standardUserDefaults stringForKey:kTold] isEqualToString:version]) return;
     UIViewController *top = SGTopController();
     // The tour, the signing sheet and Spotify's own alerts own the screen first; a sheet presented
@@ -79,10 +85,6 @@ static void offerWhenClear(NSInteger tries) {
 }
 
 void SGWatchForUpdates(void) {
-    // TEMPORARY, remove before committing: forgets which release this phone has been told about, so the
-    // sheet is offered again for one it has already had (0.20.0 was marked told on 2026-09-20 by a
-    // manual Check now, which is what let the sheet through in the first place).
-    [NSUserDefaults.standardUserDefaults removeObjectForKey:kTold];
     // Every time Spotify comes to the front, not only the first: it lives for days behind other apps,
     // and the day's usage count has to go out on a day it was merely brought back. The sheet is still
     // once per launch.
@@ -95,7 +97,7 @@ void SGWatchForUpdates(void) {
         launched = YES;
         if (!first && !SGUsageOwed()) return;
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(kSettle * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            BOOL tell = first && SGEnabled(SGKeyUpdateNotice);
+            BOOL tell = first && SGUpdateNoticeOn();
             if (tell && SGUpdateVersion()) {   // the last check knows one already
                 offerWhenClear(kTries);
             } else if (tell) {

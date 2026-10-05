@@ -44,6 +44,7 @@ void SGUsageNoteAsked(void);
 // Spotify comes up, once per release. Watched from the settings %ctor; the switch is on the Updates
 // page and takes effect at once.
 #define SGKeyUpdateNotice @"spotifyglass.update.notice"
+BOOL SGUpdateNoticeOn(void);   // the switch; off until asked for in this fork
 void SGWatchForUpdates(void);
 
 
