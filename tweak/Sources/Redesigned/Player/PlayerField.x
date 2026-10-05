@@ -203,7 +203,8 @@ static SGRPlayerCoverWatcher *sg_coverWatcher;
         flags[[@"ios-feature-nowplaying." stringByAppendingString:egg]] = @NO;
     }
     // The artwork is the picture; Canvas video would cover the field and the corners.
-    flags[@"ios-feature-canvas.canvas_enabled"] = @NO;
+    // Fork: unless it is asked for (SGRKeyPlayerCanvas), and then it is as Spotify draws it.
+    if (!SGFlag(SGRKeyPlayerCanvas, NO)) flags[@"ios-feature-canvas.canvas_enabled"] = @NO;
     SGRedesignForceFlags(@"player", flags);
     if (!SGRedesignedUI()) return;
     %init;

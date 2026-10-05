@@ -28,6 +28,9 @@
 // The artwork's colours moving behind the player (on until switched off), or the blurred artwork held
 // still; the row is on the Now playing page (Redesigned/NowPlayingBar/NowPlayingBarSettings.m).
 #define SGRKeyPlayerMotion @"spotifyglass.redesign.player.movingBackground"
+// Fork: Spotify's Canvas, the looping video some songs have, let back into the player (off until asked
+// for). The redesign keeps it out, and nothing of it has been fitted to the redesign yet.
+#define SGRKeyPlayerCanvas @"spotifyglass.redesign.player.canvas"
 
 // The field behind the player, nil until the player has laid out once (PlayerField.x).
 SGRArtworkField *SGRPlayerField(void);
