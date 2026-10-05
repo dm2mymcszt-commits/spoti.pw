@@ -91,6 +91,13 @@ BOOL SGRSongColourClears(UIView *view);
 // less. A view not yet given a size is none of them.
 BOOL SGRSongColourKeeps(UIView *view);
 
+// A sheet (the queue, Add to playlist, a menu) is painted the grey above the base surface, #1F1F1F, and
+// so are the parts of it. Puts a patch of the glow behind `sheet`'s contents and keeps that grey clear
+// inside it from now on; the sheet keeps its own paint, under the patch.
+void SGRSongColourAdoptSheet(UIView *sheet);
+// Whether `color`, about to go on `view`, is that grey inside an adopted sheet. Main thread; NO from any other.
+BOOL SGRSongColourClearsSheet(UIView *view, CGColorRef color);
+
 // Takes whatever `view` itself wears in an earlier song's accent to the playing one: its own colours and
 // its layer's, not its subviews', which arrive in a window each on their own. From -didMoveToWindow.
 void SGRSongColourCatchUp(UIView *view);

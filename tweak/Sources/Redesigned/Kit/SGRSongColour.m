@@ -35,7 +35,7 @@ static NSUInteger sg_generation;   // main thread
 static NSUInteger sg_songs;        // main thread: how many songs have given colours
 static CGFloat sg_worn[kWornMax][3];
 static NSUInteger sg_wornCount;    // main thread
-static NSHashTable<UIView *> *sg_roots;
+static NSHashTable<UIView *> *sg_roots, *sg_sheets;
 static char kGlowKey, kLiveKey, kIconSongKey, kGlyphInfoKey, kGlyphWearKey, kGlyphOriginalKey, kGlyphSongKey, kGlyphPaintKey, kKeepWhiteKey, kPatchKey;
 
 BOOL SGRSongColour(void) {
@@ -1012,6 +1012,45 @@ BOOL SGRSongColourKeeps(UIView *view) {
     CGFloat height = view.bounds.size.height;
     return height > 0 && height <= 4;
 }
+
+#pragma mark - sheets
+
+// #1F1F1F to a little either side: neutral, opaque, above the base surface and below a card.
+static BOOL sheetSurface(CGColorRef color) {
+    if (!color || CFGetTypeID(color) != CGColorGetTypeID() || CGColorGetAlpha(color) < 0.95) return NO;
+    size_t count = CGColorGetNumberOfComponents(color);
+    const CGFloat *c = CGColorGetComponents(color);
+    if (count == 2) return c[0] > 0.10 && c[0] < 0.15;
+    if (count != 4) return NO;
+    CGFloat top = MAX(c[0], MAX(c[1], c[2])), low = MIN(c[0], MIN(c[1], c[2]));
+    return top - low < 0.02 && top > 0.10 && top < 0.15;
+}
+
+BOOL SGRSongColourClearsSheet(UIView *view, CGColorRef color) {
+    if (!sheetSurface(color) || !NSThread.isMainThread || !sg_sheets.count) return NO;
+    for (UIView *v = view.superview; v; v = v.superview) {
+        if ([sg_sheets containsObject:v]) return YES;
+    }
+    return NO;
+}
+
+void SGRSongColourAdoptSheet(UIView *sheet) {
+    if (!sheet || !SGRSongColour() || !NSThread.isMainThread) return;
+    if (!sg_sheets) sg_sheets = [NSHashTable weakObjectsHashTable];
+    if (![sg_sheets containsObject:sheet]) [sg_sheets addObject:sheet];
+    SGRSongColourPatchIn(sheet, NO);
+    [CATransaction begin];
+    [CATransaction setDisableActions:YES];
+    for (UIView *part in sheet.subviews) {
+        SGForEachView(part, ^(UIView *view) {
+            if (isOwn(view) || SGRSongColourKeeps(view)) return;
+            if (sheetSurface(view.layer.backgroundColor)) view.layer.backgroundColor = NULL;
+        });
+    }
+    [CATransaction commit];
+}
+
+#pragma mark - screens, cleared
 
 static void clearBase(UIView *view) {
     if (isOwn(view)) return;

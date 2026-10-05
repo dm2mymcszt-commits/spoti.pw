@@ -21,10 +21,9 @@ __weak UIView *sgr_artistRoot = nil;
             // Fork: kept for being 4pt tall or less, which a view with no size yet is too. A row is painted
             // as it is made, before it is laid out, and stayed black over a page's field or a screen's glow
             // (the Library's rows, device dumps, 2026-10-05).
-            if (SGIsBaseSurface(color) && !SGRSongColourKeeps(view)
-                && (SGIsInside(view, sgr_playlistRoot) || SGIsInside(view, sgr_albumRoot) || SGIsInside(view, sgr_artistRoot) || SGRSongColourClears(view))) {
-                color = NULL;
-            }
+            BOOL page = SGIsBaseSurface(color)
+                && (SGIsInside(view, sgr_playlistRoot) || SGIsInside(view, sgr_albumRoot) || SGIsInside(view, sgr_artistRoot) || SGRSongColourClears(view));
+            if (!SGRSongColourKeeps(view) && (page || SGRSongColourClearsSheet(view, color))) color = NULL;
         } else if (backing) {
             if (SGIsInside(view, sgr_nowPlayingRoot)) {
                 if (SGLooksLikeCard(view, color) && sgr_nowPlayingCard != view) {
@@ -39,6 +38,9 @@ __weak UIView *sgr_artistRoot = nil;
                 color = NULL;
             } else if (SGIsBaseSurface(color) && SGRSongColourClears(view)) {
                 // Fork: a screen wearing the song's glow (SGRSongColour.h).
+                color = NULL;
+            } else if (SGRSongColourClearsSheet(view, color)) {
+                // Fork: a sheet wearing it, whose grey is another.
                 color = NULL;
             }
         } else if (SGIsBaseSurface(color) && ![view isKindOfClass:UIView.class]) {

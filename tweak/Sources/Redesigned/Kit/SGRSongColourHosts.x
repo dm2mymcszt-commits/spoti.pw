@@ -70,6 +70,26 @@
 }
 %end
 
+// Sheets: the queue, Add to playlist and whatever else Spotify brings up from the bottom were plain grey
+// over a player in the song's colours (device, 2026-10-05). Every one is hosted by
+// NavigationUI_SheetImpl.ContainerViewController, and what it shows sits in a view with id=sheet-view,
+// #1F1F1F, clipped to the sheet's corners (dumps 2026-10-05 10:58:668-676 and 10:59:672-676).
+static char kSheetViewKey;
+
+static UIView *sheetViewOf(UIView *root) {
+    for (UIView *v = root; v && ![v isKindOfClass:UIWindow.class]; v = v.superview) {
+        if ([v.accessibilityIdentifier isEqualToString:@"sheet-view"]) return v;
+    }
+    return SGRFindByIdentifier(root, @"sheet-view", &kSheetViewKey);
+}
+
+%hook _TtC22NavigationUI_SheetImpl23ContainerViewController
+- (void)viewDidLayoutSubviews {
+    %orig;
+    SGRSongColourAdoptSheet(sheetViewOf(((UIViewController *)self).viewIfLoaded));
+}
+%end
+
 #pragma mark - views joining a screen
 
 // Spotify paints a cell its base surface before the cell is in the list, so the repaint hook, which asks
@@ -82,7 +102,8 @@
     UIView *view = (UIView *)self;
     if (!view.window) return;
     CGColorRef bg = view.layer.backgroundColor;
-    if (bg && SGIsBaseSurface(bg) && !SGRSongColourKeeps(view) && ![view isKindOfClass:SGRSongGlowView.class] && SGRSongColourClears(view)) {
+    if (bg && !SGRSongColourKeeps(view) && ![view isKindOfClass:SGRSongGlowView.class]
+        && ((SGIsBaseSurface(bg) && SGRSongColourClears(view)) || SGRSongColourClearsSheet(view, bg))) {
         view.layer.backgroundColor = NULL;
     }
     SGRSongColourCatchUp(view);
@@ -252,5 +273,6 @@ static void keepLabelsWhite(UIView *root) {
         @"_TtC18Search_FeatureImpl35SearchUIContainerViewControllerImpl",
         @"_TtC18Search_FeatureImpl20HeaderViewController",
         @"_TtC21Settings_PlatformImpl26SettingsListViewController",
+        @"_TtC22NavigationUI_SheetImpl23ContainerViewController",
     ]);
 }
