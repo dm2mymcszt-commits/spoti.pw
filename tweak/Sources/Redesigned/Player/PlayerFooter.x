@@ -21,6 +21,7 @@
 // id=QueueButtonNowPlaying 47x32.
 #import "Core/SGCore.h"
 #import "Redesigned/Kit/SGRKit.h"
+#import "Redesigned/Kit/SGRWorkaround.h"
 #import "Player.h"
 
 static const CGFloat kLyricsGlyphSize = 20;
@@ -221,7 +222,11 @@ static void lowerRow(UIView *row) {
     UIView *queue = SGRFindByIdentifier(host, @"QueueButtonNowPlaying", &kQueueKey);
     CGFloat queueFrom = moveTo(arrangedAround(queue, host), queue, CGPointMake(CGRectGetMidX(queue.bounds), CGRectGetMidY(queue.bounds)), host, round(width * (rtl ? kLeading : kTrailing)));
 
-    lowerRow(host);
+    // Fork: only a player with nothing under it. With its cards kept (the Player workaround) the first of
+    // them comes up to 60pt from the bottom of the screen, as Spotify lays it out, and the lowered row went
+    // under it: the About the artist card over the lyrics, device and queue glyphs (device, dump 2026-10-05:
+    // the row at 850 to 894, the card from 866).
+    if (SGRResizesListCells(@"player")) lowerRow(host);
 
     static dispatch_once_t once;
     dispatch_once(&once, ^{
