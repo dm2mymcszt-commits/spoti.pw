@@ -17,6 +17,26 @@ static NSString *hexColor(CGColorRef color) {
     return [NSString stringWithFormat:@"#%02X%02X%02X@%.2f", (int)(r * 255), (int)(g * 255), (int)(b * 255), a];
 }
 
+// Fork: a mask's kind and place, and for a gradient how see-through each stop is and which way it runs:
+// what tells a fade that is there from one that is not, or that lies where nothing shows.
+static NSString *describeMask(CALayer *mask) {
+    NSMutableString *text = [NSMutableString stringWithFormat:@"(%@ %@", NSStringFromClass(mask.class), NSStringFromCGRect(mask.frame)];
+    if ([mask isKindOfClass:CAGradientLayer.class]) {
+        CAGradientLayer *gradient = (CAGradientLayer *)mask;
+        NSMutableArray<NSString *> *alphas = [NSMutableArray array];
+        for (id color in gradient.colors) {
+            BOOL cg = CFGetTypeID((__bridge CFTypeRef)color) == CGColorGetTypeID();
+            [alphas addObject:cg ? [NSString stringWithFormat:@"%.2f", CGColorGetAlpha((__bridge CGColorRef)color)] : @"?"];
+        }
+        [text appendFormat:@" a=[%@] at=[%@] %@>%@", [alphas componentsJoinedByString:@","],
+                           [gradient.locations componentsJoinedByString:@","],
+                           NSStringFromCGPoint(gradient.startPoint), NSStringFromCGPoint(gradient.endPoint)];
+    }
+    if (mask.sublayers.count) [text appendFormat:@" +%lu sublayers", (unsigned long)mask.sublayers.count];
+    [text appendString:@")"];
+    return text;
+}
+
 static void appendTree(UIView *view, NSUInteger depth, NSMutableString *out) {
     NSMutableString *line = [NSMutableString stringWithFormat:@"%*s%@ %@", (int)depth * 2, "", NSStringFromClass(view.class), NSStringFromCGRect(view.frame)];
     CGColorRef bg = view.layer.backgroundColor;
@@ -24,8 +44,16 @@ static void appendTree(UIView *view, NSUInteger depth, NSMutableString *out) {
     if (view.layer.cornerRadius > 0) [line appendFormat:@" r=%.1f", view.layer.cornerRadius];
     if (view.alpha < 1) [line appendFormat:@" a=%.2f", view.alpha];
     if (view.hidden) [line appendString:@" hidden"];
-    if (view.layer.mask) [line appendString:@" masked"];
+    if (view.layer.mask) [line appendFormat:@" masked%@", describeMask(view.layer.mask)];
     if (view.clipsToBounds) [line appendString:@" clips"];
+    // Fork: what a view shows without painting a background: a layer of another kind, or its own drawing.
+    // A square with nothing on its line could not be told from an empty view (device, 2026-10-05).
+    if (![view.layer isMemberOfClass:CALayer.class]) [line appendFormat:@" layer=%@", NSStringFromClass(view.layer.class)];
+    if ([view.layer isKindOfClass:CAShapeLayer.class] && ((CAShapeLayer *)view.layer).fillColor) {
+        [line appendFormat:@" fill=%@", hexColor(((CAShapeLayer *)view.layer).fillColor)];
+    }
+    if ([view methodForSelector:@selector(drawRect:)] != [UIView instanceMethodForSelector:@selector(drawRect:)]
+        && ![view isKindOfClass:UILabel.class] && ![view isKindOfClass:UIImageView.class]) [line appendString:@" draws"];
     if (view.accessibilityIdentifier.length) [line appendFormat:@" id=%@", view.accessibilityIdentifier];
     if ([view isKindOfClass:UIControl.class] && view.accessibilityLabel.length) [line appendFormat:@" a11y=\"%@\"", view.accessibilityLabel];
     if ([view isKindOfClass:UILabel.class]) {
@@ -38,6 +66,9 @@ static void appendTree(UIView *view, NSUInteger depth, NSMutableString *out) {
         if (sub.delegate) continue;
         CGColorRef subBg = sub.backgroundColor;
         if (subBg && CGColorGetAlpha(subBg) > 0) [line appendFormat:@" sub=%@%@", hexColor(subBg), sub.hidden ? @"(hidden)" : @""];
+        if ([sub isKindOfClass:CAShapeLayer.class] && ((CAShapeLayer *)sub).fillColor) {
+            [line appendFormat:@" subfill=%@%@", hexColor(((CAShapeLayer *)sub).fillColor), sub.hidden ? @"(hidden)" : @""];
+        }
     }
     if ([view isKindOfClass:UIImageView.class] && ((UIImageView *)view).image) {
         CGSize size = ((UIImageView *)view).image.size;
