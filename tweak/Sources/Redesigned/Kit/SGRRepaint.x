@@ -16,7 +16,16 @@ __weak UIView *sgr_artistRoot = nil;
 - (void)setBackgroundColor:(CGColorRef)color {
     if (color && (sgr_nowPlayingRoot || sgr_lyricsPageRoot || sgr_playlistRoot || sgr_albumRoot || sgr_artistRoot || SGRSongColour())) {
         UIView *view = (UIView *)self.delegate;
-        if ([view isKindOfClass:UIView.class] && view.layer == self && !SGKeepsColor(view)) {
+        BOOL backing = [view isKindOfClass:UIView.class] && view.layer == self;
+        if (backing && SGKeepsColor(view)) {
+            // Fork: kept for being 4pt tall or less, which a view with no size yet is too. A row is painted
+            // as it is made, before it is laid out, and stayed black over a page's field or a screen's glow
+            // (the Library's rows, device dumps, 2026-10-05).
+            if (SGIsBaseSurface(color) && !SGRSongColourKeeps(view)
+                && (SGIsInside(view, sgr_playlistRoot) || SGIsInside(view, sgr_albumRoot) || SGIsInside(view, sgr_artistRoot) || SGRSongColourClears(view))) {
+                color = NULL;
+            }
+        } else if (backing) {
             if (SGIsInside(view, sgr_nowPlayingRoot)) {
                 if (SGLooksLikeCard(view, color) && sgr_nowPlayingCard != view) {
                     sgr_nowPlayingCard = view;

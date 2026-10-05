@@ -5,13 +5,17 @@
 //
 // The screens (device dumps, 2026-09-19 and -20):
 //   Home      Home_FunkisPageImpl.FunkisViewController's view
-//   Search    Browse_BrowsePageImpl.BrowsePageViewController's view
+//   Search    Browse_BrowsePageImpl.BrowsePageViewController's view; and, once the field is tapped,
+//             Search_FeatureImpl.SearchUIContainerViewControllerImpl's (id=SearchUIContainerViewController.view,
+//             dumps 2026-10-05): the recent searches and the results in one list the size of the screen, under
+//             Search_FeatureImpl.HeaderViewController's view, a 95pt bar of #1F1F1F holding the field
 //   Library   YourLibrary_YourLibraryXImpl.YourLibraryView
 //   Settings  Settings_PlatformImpl.SettingsListViewController's view, and the Mod Settings pages (SGPage,
 //             a table view controller, so the glow is its table's background view)
 #import "Core/SGCore.h"
 #import "Settings/SGPage.h"
 #import "SGRSongColour.h"
+#import "SGRRestyle.h"
 
 #pragma mark - the screens
 
@@ -26,6 +30,22 @@
 - (void)viewDidLayoutSubviews {
     %orig;
     SGRSongColourAdopt(((UIViewController *)self).viewIfLoaded);
+}
+%end
+
+// The list runs under the header, so the header takes a patch of the glow: its own grey is covered, and the
+// rows going under it are too.
+%hook _TtC18Search_FeatureImpl35SearchUIContainerViewControllerImpl
+- (void)viewDidLayoutSubviews {
+    %orig;
+    SGRSongColourAdopt(((UIViewController *)self).viewIfLoaded);
+}
+%end
+
+%hook _TtC18Search_FeatureImpl20HeaderViewController
+- (void)viewDidLayoutSubviews {
+    %orig;
+    SGRSongColourPatchIn(((UIViewController *)self).viewIfLoaded, NO);
 }
 %end
 
@@ -62,7 +82,7 @@
     UIView *view = (UIView *)self;
     if (!view.window) return;
     CGColorRef bg = view.layer.backgroundColor;
-    if (bg && SGIsBaseSurface(bg) && !SGKeepsColor(view) && ![view isKindOfClass:SGRSongGlowView.class] && SGRSongColourClears(view)) {
+    if (bg && SGIsBaseSurface(bg) && !SGRSongColourKeeps(view) && ![view isKindOfClass:SGRSongGlowView.class] && SGRSongColourClears(view)) {
         view.layer.backgroundColor = NULL;
     }
     SGRSongColourCatchUp(view);
@@ -157,6 +177,15 @@ static UIColor *tinted(UIColor *color) {
     return SGRSongLiveText(a) ?: color;
 }
 
+static char kBiographyLabelKey;
+
+static void keepLabelsWhite(UIView *root) {
+    if (!root) return;
+    SGForEachView(root, ^(UIView *view) {
+        if ([view isKindOfClass:UILabel.class] && !SGRSongColourKeepsWhite((UILabel *)view)) SGRSongColourKeepWhite((UILabel *)view);
+    });
+}
+
 %group Text
 %hook UILabel
 - (void)setTextColor:(UIColor *)color {
@@ -180,17 +209,48 @@ static UIColor *tinted(UIColor *color) {
     %orig(copy ?: text);
 }
 %end
+
+// Text over a picture stays white, as the titles on Search's coloured cards do (Search/SearchCards.x): the
+// song's shade over a photograph is a colour on colours, and was hard to read (device, 2026-10-05). The cards
+// that draw their words over a picture:
+//   WatchFeed_ECMKit.WatchFeedVideoCardView (id=WatchFeedVideoCardView), the picture cards of the player's
+//     Explore card: "Songs by", "Similar to" (dump 100227:443-470). Search's Discover row looks like the
+//     same card and has not been dumped
+//   Creator_ECMKit's CreatorBiographyCardLayout, About the artist, whose header label
+//     (id=Components.UI.CreatorBiographyCard.HeaderLabel) lies over the artist's photograph (:363-371)
+%hook _TtC16WatchFeed_ECMKit22WatchFeedVideoCardView
+- (void)layoutSubviews {
+    %orig;
+    keepLabelsWhite((UIView *)self);
+}
+%end
+
+%hook _TtC14Creator_ECMKitP33_9A9A9C9886A2DEDE51521D11F82E7F9026CreatorBiographyCardLayout
+- (void)layoutSubviews {
+    %orig;
+    UIView *card = (UIView *)self;
+    keepLabelsWhite(SGRFindByIdentifier(card, @"Components.UI.CreatorBiographyCard.HeaderLabel", &kBiographyLabelKey));
+}
+%end
 %end
 
 %ctor {
     if (!SGRedesignedUI() || !SGRSongColour()) return;
     %init;
-    if (SGRSongColourText()) %init(Text);
+    if (SGRSongColourText()) {
+        %init(Text);
+        SGRequireClasses(@[
+            @"_TtC16WatchFeed_ECMKit22WatchFeedVideoCardView",
+            @"_TtC14Creator_ECMKitP33_9A9A9C9886A2DEDE51521D11F82E7F9026CreatorBiographyCardLayout",
+        ]);
+    }
     SGRSongColourStart();
     SGRequireClasses(@[
         @"_TtC19Home_FunkisPageImpl20FunkisViewController",
         @"_TtC21Browse_BrowsePageImpl24BrowsePageViewController",
         @"_TtC28YourLibrary_YourLibraryXImpl15YourLibraryView",
+        @"_TtC18Search_FeatureImpl35SearchUIContainerViewControllerImpl",
+        @"_TtC18Search_FeatureImpl20HeaderViewController",
         @"_TtC21Settings_PlatformImpl26SettingsListViewController",
     ]);
 }

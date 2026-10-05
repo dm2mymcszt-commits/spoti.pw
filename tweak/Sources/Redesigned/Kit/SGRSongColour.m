@@ -25,7 +25,7 @@ static const CGFloat kAccentLightness = 0.55, kTextLightness = 0.74;
 static const CGFloat kBlobSide = 1.3, kBlobOpacity[2] = {0.42, 0.32}, kSecondTurn = 4.0 / 3;
 static const CGPoint kBlobCentre[2] = {{0.3, 0.35}, {0.7, 0.7}};
 // Accents remembered besides the playing one; the Appearance accent is always the first of them.
-enum { kWornMax = 12 };
+enum { kWornMax = 32 };
 
 static os_unfair_lock sg_lock = OS_UNFAIR_LOCK_INIT;
 static BOOL sg_hasColour;
@@ -36,7 +36,7 @@ static NSUInteger sg_songs;        // main thread: how many songs have given col
 static CGFloat sg_worn[kWornMax][3];
 static NSUInteger sg_wornCount;    // main thread
 static NSHashTable<UIView *> *sg_roots;
-static char kGlowKey, kLiveKey, kIconSongKey, kGlyphInfoKey, kGlyphOriginalKey, kGlyphSongKey, kGlyphPaintKey, kKeepWhiteKey;
+static char kGlowKey, kLiveKey, kIconSongKey, kGlyphInfoKey, kGlyphWearKey, kGlyphOriginalKey, kGlyphSongKey, kGlyphPaintKey, kKeepWhiteKey, kPatchKey;
 
 BOOL SGRSongColour(void) {
     static BOOL on;
@@ -300,25 +300,46 @@ static void readCover(UIImage *image) {
 
 #pragma mark - accents worn
 
-// Spotify blends its green into darker states, which keep the hue and lose brightness, so a colour belongs
-// to an accent when it is saturated and of the accent's hue. The text is of the same hue, only lighter. Not
-// much darker than the accent: the Home tiles are tinted by their covers, dark and a little saturated, and
-// with a dozen accents remembered one of them would sooner or later share a tile's hue.
+// What wears an accent is told by its colour alone, so the test has to be exact. Three things are handed
+// out: the accent, the accent darkened (Spotify's older green is 0.86 of the token, and it blends the token
+// towards black for its pressed and disabled states), and the accent's text shade. A colour wears an accent
+// when it is one of those to within rounding.
+//
+// It was once any saturated colour near the accent's hue. With a dozen accents remembered their hues
+// covered most of the wheel, and colours that were never the accent went with them: a verified badge came
+// out mint green (device, 2026-10-05).
 typedef struct {
-    CGFloat h, s, l;
-} SGRFamily;
+    BOOL text;        // the text shade, else the accent at `factor` of its brightness
+    CGFloat factor;
+} SGRWear;
 
-static SGRFamily familyOf(const CGFloat rgb[3]) {
-    SGRFamily family;
-    toHSL(rgb[0], rgb[1], rgb[2], &family.h, &family.s, &family.l);
-    return family;
+// A grey accent is not looked for: every grey would wear it.
+static const CGFloat kMinChroma = 0.12, kMinFactor = 0.3, kMaxFactor = 1.04;
+
+static void textShade(const CGFloat accent[3], CGFloat out[3]) {
+    CGFloat h, s, l;
+    toHSL(accent[0], accent[1], accent[2], &h, &s, &l);
+    fromHSL(h, s, kTextLightness, out);
 }
 
-static BOOL inFamily(CGFloat h, CGFloat s, CGFloat l, SGRFamily family) {
-    if (s < 0.3 || l < 0.08 || l > 0.95 || fabs(l - family.l) > 0.3) return NO;
-    CGFloat dh = fabs(h - family.h);
-    dh = MIN(dh, 1 - dh);
-    return dh < 0.045 && fabs(s - family.s) < 0.35;
+static BOOL wears(const CGFloat c[4], const CGFloat accent[3], SGRWear *wear) {
+    CGFloat top = MAX(accent[0], MAX(accent[1], accent[2])), low = MIN(accent[0], MIN(accent[1], accent[2]));
+    if (top - low < kMinChroma) return NO;
+    CGFloat text[3];
+    textShade(accent, text);
+    if (fabs(c[0] - text[0]) < 0.03 && fabs(c[1] - text[1]) < 0.03 && fabs(c[2] - text[2]) < 0.03) {
+        *wear = (SGRWear){YES, 1};
+        return YES;
+    }
+    CGFloat factor = MAX(c[0], MAX(c[1], c[2])) / top;
+    if (factor < kMinFactor || factor > kMaxFactor) return NO;
+    // Tighter the darker it is: at a third of the accent's brightness the channels are a third as far apart.
+    CGFloat slack = 0.015 + 0.03 * factor;
+    for (int i = 0; i < 3; i++) {
+        if (fabs(c[i] - accent[i] * factor) > slack) return NO;
+    }
+    *wear = (SGRWear){NO, MIN(1, factor)};
+    return YES;
 }
 
 // Before the first song the app wears the accent Appearance set, or Spotify's green.
@@ -332,7 +353,7 @@ static void appearanceAccent(CGFloat out[3]) {
 
 // The accent worn until now joins the worn ones. The Appearance accent, the first, is never dropped: what
 // was painted before the first song can turn up any time.
-static void wear(const CGFloat accent[3]) {
+static void remember(const CGFloat accent[3]) {
     for (NSUInteger i = 0; i < sg_wornCount; i++) {
         if (fabs(sg_worn[i][0] - accent[0]) < 0.004 && fabs(sg_worn[i][1] - accent[1]) < 0.004 && fabs(sg_worn[i][2] - accent[2]) < 0.004) return;
     }
@@ -343,23 +364,15 @@ static void wear(const CGFloat accent[3]) {
     memcpy(sg_worn[sg_wornCount++], accent, sizeof(sg_worn[0]));
 }
 
-// The accent `c` wears, into `from`: the playing one when `current` allows it, else the latest earlier one
-// it matches. Main thread.
-static BOOL wornBy(CGFloat c[4], BOOL current, CGFloat from[3]) {
+// How `c` wears an accent, into `wear`: the playing one when `current` allows it, else the latest earlier
+// one it matches. Main thread.
+static BOOL wornBy(const CGFloat c[4], BOOL current, SGRWear *wear) {
     if (!sg_hasColour || c[3] < 0.05) return NO;
     // Greys first, cheaply: most colours asked about are.
-    if (MAX(c[0], MAX(c[1], c[2])) - MIN(c[0], MIN(c[1], c[2])) < 0.08) return NO;
-    CGFloat h, s, l;
-    toHSL(c[0], c[1], c[2], &h, &s, &l);
-    if (inFamily(h, s, l, familyOf(sg_accent))) {
-        if (!current) return NO;
-        memcpy(from, sg_accent, sizeof(sg_accent));
-        return YES;
-    }
+    if (MAX(c[0], MAX(c[1], c[2])) - MIN(c[0], MIN(c[1], c[2])) < 0.03) return NO;
+    if (wears(c, sg_accent, wear)) return current;
     for (NSInteger i = (NSInteger)sg_wornCount - 1; i >= 0; i--) {
-        if (!inFamily(h, s, l, familyOf(sg_worn[i]))) continue;
-        memcpy(from, sg_worn[i], sizeof(sg_worn[0]));
-        return YES;
+        if (wears(c, sg_worn[i], wear)) return YES;
     }
     return NO;
 }
@@ -370,35 +383,25 @@ static BOOL white(CGFloat c[4]) {
     return c[0] > 0.93 && c[1] > 0.93 && c[2] > 0.93 && c[3] > 0.9;
 }
 
-// `c` taken from the family of `from` into the playing accent's, keeping how much lighter or darker than
-// `from` it was, and its alpha.
-static UIColor *mapped(CGFloat c[4], const CGFloat from[3]) {
-    CGFloat h, s, l, fh, fs, fl, th, ts, tl, out[3];
-    toHSL(c[0], c[1], c[2], &h, &s, &l);
-    toHSL(from[0], from[1], from[2], &fh, &fs, &fl);
-    toHSL(sg_accent[0], sg_accent[1], sg_accent[2], &th, &ts, &tl);
-    CGFloat lightness = MIN(0.95, MAX(0.05, tl + (l - fl)));
-    fromHSL(th, ts, lightness, out);
-    return plainColour(out[0], out[1], out[2], c[3]);
+// What wore an accent as `wear` says, in the playing song's colours.
+static UIColor *mapped(SGRWear wear, CGFloat alpha) {
+    if (wear.text) return plainColour(sg_text[0], sg_text[1], sg_text[2], alpha);
+    return plainColour(sg_accent[0] * wear.factor, sg_accent[1] * wear.factor, sg_accent[2] * wear.factor, alpha);
 }
 
-// A live colour for `c`, which wears the accent `from`: the text when it is as light as the text, else the
-// accent at c's brightness, so it follows every song from now on. The mapped colour when neither fits.
-static UIColor *liveFor(CGFloat c[4], const CGFloat from[3]) {
-    CGFloat h, s, l;
-    toHSL(c[0], c[1], c[2], &h, &s, &l);
-    UIColor *fixed = mapped(c, from);
-    if (SGRSongColourText() && fabs(l - kTextLightness) < 0.06) return SGRSongLiveText(c[3]) ?: fixed;
-    CGFloat base = MAX(from[0], MAX(from[1], from[2])), factor = base > 0 ? MAX(c[0], MAX(c[1], c[2])) / base : 0;
-    if (factor < 0.2 || factor > 1.05) return fixed;
-    return SGRSongLiveAccent(MIN(factor, 1), c[3], fixed) ?: fixed;
+// The same as a live colour, so it follows every song from now on.
+static UIColor *liveFor(SGRWear wear, CGFloat alpha) {
+    UIColor *fixed = mapped(wear, alpha);
+    if (wear.text) return SGRSongLiveText(alpha) ?: fixed;
+    return SGRSongLiveAccent(wear.factor, alpha, fixed) ?: fixed;
 }
 
 // An earlier accent's CGColor taken to the playing one, retained; NULL when it wears no earlier accent.
 static CGColorRef copyRemapped(CGColorRef color) {
-    CGFloat c[4], from[3];
-    if (!components(color, c) || !wornBy(c, NO, from)) return NULL;
-    return CGColorRetain(mapped(c, from).CGColor);
+    CGFloat c[4];
+    SGRWear wear;
+    if (!components(color, c) || !wornBy(c, NO, &wear)) return NULL;
+    return CGColorRetain(mapped(wear, c[3]).CGColor);
 }
 
 static id remappedValue(id value) {
@@ -496,9 +499,10 @@ static UIColor *iconColour(UIColor *color) {
     CGFloat alpha = CGColorGetAlpha(color.CGColor);
     NSNumber *live = objc_getAssociatedObject(color, &kLiveKey);
     if (live) return live.doubleValue < 0 ? SGRSongLiveText(alpha) : SGRSongLiveAccent(live.doubleValue, alpha, nil);
-    CGFloat c[4], from[3];
-    if (!components(color.CGColor, c) || !wornBy(c, YES, from)) return nil;
-    return liveFor(c, from);
+    CGFloat c[4];
+    SGRWear wear;
+    if (!components(color.CGColor, c) || !wornBy(c, YES, &wear)) return nil;
+    return liveFor(wear, c[3]);
 }
 
 static void recolourIcon(UIView *view) {
@@ -604,9 +608,23 @@ UIImage *SGRSongColourGlyph(UIImage *image) {
     // One painting per image and song, however often Spotify sets the image again (a button does on each pass).
     UIImage *cached = ((SGRWeak *)objc_getAssociatedObject(image, &kGlyphPaintKey)).object;
     if (cached && [objc_getAssociatedObject(cached, &kGlyphSongKey) unsignedIntegerValue] == sg_songs) return cached;
-    CGFloat c[4], from[3];
-    if (!glyphColour(image, c) || !wornBy(c, YES, from)) return nil;
-    UIImage *paint = painted(image, mapped(c, from));
+    // How the image wears an accent is found once and kept on it: by the time Spotify shows it again the
+    // accent it was drawn in may have left the worn ones, and the image would keep the last colour it was
+    // painted for good.
+    NSArray<NSNumber *> *known = objc_getAssociatedObject(image, &kGlyphWearKey);
+    SGRWear wear;
+    if (known.count == 2) {
+        wear = (SGRWear){known[0].boolValue, known[1].doubleValue};
+    } else {
+        CGFloat c[4];
+        if (!glyphColour(image, c)) return nil;
+        BOOL current = wears(c, sg_accent, &wear);
+        if (!current && !wornBy(c, NO, &wear)) return nil;
+        objc_setAssociatedObject(image, &kGlyphWearKey, @[@(wear.text), @(wear.factor)], OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        // Drawn in the playing song's colour already: nothing to paint until the next song.
+        if (current) return nil;
+    }
+    UIImage *paint = painted(image, mapped(wear, 1));
     objc_setAssociatedObject(paint, &kGlyphOriginalKey, image, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     objc_setAssociatedObject(paint, &kGlyphSongKey, @(sg_songs), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     SGRWeak *box = [SGRWeak new];
@@ -643,17 +661,18 @@ BOOL SGRSongColourKeepsWhite(UILabel *label) {
 
 // What one view wears itself, and its layer's. A label or a title in an earlier accent takes a live colour.
 static void recolourOne(UIView *view) {
-    CGFloat c[4], from[3];
+    CGFloat c[4];
+    SGRWear wear;
     if ([view isKindOfClass:UILabel.class]) {
         UILabel *label = (UILabel *)view;
         UIColor *color = label.textColor;
-        if (!objc_getAssociatedObject(color, &kLiveKey) && components(color.CGColor, c) && wornBy(c, NO, from)) {
-            label.textColor = liveFor(c, from);
+        if (!objc_getAssociatedObject(color, &kLiveKey) && components(color.CGColor, c) && wornBy(c, NO, &wear)) {
+            label.textColor = liveFor(wear, c[3]);
         }
     } else if ([view isKindOfClass:UIButton.class]) {
         UIButton *button = (UIButton *)view;
-        if (components([button titleColorForState:UIControlStateNormal].CGColor, c) && wornBy(c, NO, from)) {
-            [button setTitleColor:liveFor(c, from) forState:UIControlStateNormal];
+        if (components([button titleColorForState:UIControlStateNormal].CGColor, c) && wornBy(c, NO, &wear)) {
+            [button setTitleColor:liveFor(wear, c[3]) forState:UIControlStateNormal];
         }
     } else if ([view isKindOfClass:UIImageView.class]) {
         UIImageView *imageView = (UIImageView *)view;
@@ -662,8 +681,8 @@ static void recolourOne(UIView *view) {
         // A glyph drawn in its tint: what the tint is, only a template shows.
         UIImage *image = imageView.image;
         if (image && (image.renderingMode == UIImageRenderingModeAlwaysTemplate || image.isSymbolImage)
-            && components(imageView.tintColor.CGColor, c) && wornBy(c, NO, from)) {
-            imageView.tintColor = liveFor(c, from);
+            && components(imageView.tintColor.CGColor, c) && wornBy(c, NO, &wear)) {
+            imageView.tintColor = liveFor(wear, c[3]);
         }
     } else if (iconClass() && [view isKindOfClass:iconClass()]) {
         recolourIcon(view);
@@ -721,9 +740,9 @@ static void publish(SGRReading reading, CGImageRef glow, CGImageRef blob) {
     if (!sg_wornCount) {
         CGFloat appearance[3];
         appearanceAccent(appearance);
-        wear(appearance);
+        remember(appearance);
     }
-    wear(before);
+    remember(before);
     os_unfair_lock_lock(&sg_lock);
     memcpy(sg_accent, accent, sizeof(sg_accent));
     memcpy(sg_text, text, sizeof(sg_text));
@@ -915,15 +934,88 @@ void SGRSongColourMotionSpeedChanged(void) {
 
 @end
 
+#pragma mark - a patch of the glow
+
+// Every glow fills its screen from the window's corner, so a glow laid out over the window's bounds, seen
+// through the patch's own, is the same picture in the same place, and the two discs of a moving one keep
+// the same time.
+@interface SGRSongGlowPatch ()
+- (void)sgr_place;
+@end
+
+@implementation SGRSongGlowPatch {
+    SGRSongGlowView *_glow;
+}
+
+- (instancetype)initWithFrame:(CGRect)frame {
+    if (!(self = [super initWithFrame:frame])) return nil;
+    self.userInteractionEnabled = NO;
+    self.accessibilityElementsHidden = YES;
+    self.clipsToBounds = YES;
+    _glow = [SGRSongGlowView new];
+    [self addSubview:_glow];
+    return self;
+}
+
+- (void)sgr_place {
+    UIWindow *window = self.window;
+    if (!window) return;
+    CGRect screen = [self convertRect:window.bounds fromView:nil];
+    if (!CGRectEqualToRect(_glow.frame, screen)) _glow.frame = screen;
+}
+
+- (void)layoutSubviews {
+    [super layoutSubviews];
+    [self sgr_place];
+}
+
+- (void)didMoveToWindow {
+    [super didMoveToWindow];
+    [self sgr_place];
+}
+
+@end
+
+SGRSongGlowPatch *SGRSongColourPatchIn(UIView *host, BOOL front) {
+    if (!host || !SGRSongColour()) return nil;
+    SGRSongGlowPatch *patch = objc_getAssociatedObject(host, &kPatchKey);
+    if (!patch) {
+        patch = [SGRSongGlowPatch new];
+        patch.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+        objc_setAssociatedObject(host, &kPatchKey, patch, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
+    if (patch.superview != host) {
+        if (front) [host addSubview:patch];
+        else [host insertSubview:patch atIndex:0];
+    } else if (front && host.subviews.lastObject != patch) {
+        [host bringSubviewToFront:patch];
+    } else if (!front && host.subviews.firstObject != patch) {
+        [host sendSubviewToBack:patch];
+    }
+    if (!CGRectEqualToRect(patch.frame, host.bounds)) patch.frame = host.bounds;
+    [patch sgr_place];
+    return patch;
+}
+
 #pragma mark - screens
 
 static BOOL isOwn(UIView *view) {
     return [view isKindOfClass:SGRSongGlowView.class];
 }
 
+// What a glowing screen leaves its paint: pictures, labels and hairlines. A view with no size yet is not a
+// hairline. The Library's rows are painted the base surface as they are made, before they are laid out, and
+// kept as hairlines they stayed black over the glow, new rows only, so the list came out striped (device
+// dumps, 2026-10-05).
+BOOL SGRSongColourKeeps(UIView *view) {
+    if ([view isKindOfClass:UIImageView.class] || [view isKindOfClass:UILabel.class]) return YES;
+    CGFloat height = view.bounds.size.height;
+    return height > 0 && height <= 4;
+}
+
 static void clearBase(UIView *view) {
     if (isOwn(view)) return;
-    if (!SGKeepsColor(view) && SGIsBaseSurface(view.layer.backgroundColor)) view.layer.backgroundColor = NULL;
+    if (!SGRSongColourKeeps(view) && SGIsBaseSurface(view.layer.backgroundColor)) view.layer.backgroundColor = NULL;
     for (CALayer *layer in view.layer.sublayers) {
         if (!layer.delegate && SGIsBaseSurface(layer.backgroundColor)) layer.backgroundColor = NULL;
     }

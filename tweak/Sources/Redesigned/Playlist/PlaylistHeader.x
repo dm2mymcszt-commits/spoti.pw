@@ -30,6 +30,7 @@
 // fire Spotify's own concealed controls, so every action, state and language stays Spotify's.
 #import "Core/SGCore.h"
 #import "Redesigned/Kit/SGRKit.h"
+#import "Redesigned/Kit/SGRSongColour.h"
 #import "Playlist.h"
 #import <objc/message.h>
 
@@ -467,6 +468,8 @@ static void applyToolbar(UIView *headerRoot) {
 // Spotify writes their alpha on every step of the scroll, and the navigation bar's with -setHidden:.
 static void applyScrims(UIView *headerRoot) {
     conceal(SGRFindByIdentifier(headerRoot, @"LiquidGlass.gradientContainer", &kScrimKey));
+    // Fork: with Song colour the bar's scrim is covered rather than concealed, in the bar's own pass (below).
+    if (SGRSongColour()) return;
     // A concealed view stays concealed, so the bar is looked for until it is found and then never again:
     // the header lays out on every step of its collapse.
     if (objc_getAssociatedObject(headerRoot, &kBarScrimKey)) return;
@@ -479,6 +482,23 @@ static void applyScrims(UIView *headerRoot) {
         objc_setAssociatedObject(headerRoot, &kBarScrimKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     }
 }
+
+// Fork: the bar's scrim under Song colour. Looked for once per header it was missed: Liked Songs kept
+// Spotify's blue across the top of the page, and a mix its own teal (device, dumps 2026-10-05:
+// HeaderNavigationBar 428x103 > LegacyUI_ECMCoreKit.GradientView, neither hidden nor masked). And concealed
+// it leaves the bar with nothing behind its title, which before iOS 26 has no scroll edge effect to keep it
+// clear of the rows. So the scrim is kept and covered with a patch of the page's glow: Spotify shows and
+// hides the scrim as the header collapses, and the patch inside it comes and goes with it.
+%hook _TtC28EncoreConsumerMobile_BaseKit19HeaderNavigationBar
+- (void)layoutSubviews {
+    %orig;
+    UIView *bar = (UIView *)self;
+    if (!SGRSongColour() || !SGRPlaylistHeaderOf(bar)) return;
+    for (UIView *sub in bar.subviews) {
+        if ([NSStringFromClass(sub.class) containsString:@"GradientView"]) SGRSongColourPatchIn(sub, YES);
+    }
+}
+%end
 
 // Spotify's colour wash goes, so the page's field shows through, and the plane it was drawn on is handed
 // back: it is where the hero belongs (applyHero).
@@ -632,5 +652,6 @@ static UIView *layoutIn(UIView *root) {
         @"_TtC28EncoreConsumerMobile_BaseKit19HeaderContentLayout",
         @"SPTFreeTierPlaylistEncoreHeaderViewController",
         @"_TtC28EncoreConsumerMobile_BaseKit14PlayButtonView",
+        @"_TtC28EncoreConsumerMobile_BaseKit19HeaderNavigationBar",
     ]);
 }

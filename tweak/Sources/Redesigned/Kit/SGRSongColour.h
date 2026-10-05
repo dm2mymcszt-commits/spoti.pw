@@ -72,11 +72,24 @@ void SGRSongColourStart(void);
 @interface SGRSongGlowView : UIView
 @end
 
+// A piece of the glow for a bar that lies over a glowing screen: it shows what the screen's glow shows in
+// the same place, so the bar covers what scrolls under it and has no edge of its own to show.
+@interface SGRSongGlowPatch : UIView
+@end
+
+// A patch filling `host`, made once per host and kept in place on every call: behind everything else in it,
+// or in front of everything (`front`, for a view that paints on sublayers of its own, which a subview at the
+// back would lie under). nil with Song colour off.
+SGRSongGlowPatch *SGRSongColourPatchIn(UIView *host, BOOL front);
+
 // Puts a glow behind `root` (its backgroundView when it is a table or collection view, else its first
 // subview) and keeps Spotify's base surface inside it clear from now on, so the glow shows through.
 void SGRSongColourAdopt(UIView *root);
 // Whether `view` sits inside an adopted root. Main thread; NO from any other.
 BOOL SGRSongColourClears(UIView *view);
+// Whether `view` keeps the paint it has on a glowing screen: a picture, a label, or a hairline of 4pt or
+// less. A view not yet given a size is none of them.
+BOOL SGRSongColourKeeps(UIView *view);
 
 // Takes whatever `view` itself wears in an earlier song's accent to the playing one: its own colours and
 // its layer's, not its subviews', which arrive in a window each on their own. From -didMoveToWindow.
